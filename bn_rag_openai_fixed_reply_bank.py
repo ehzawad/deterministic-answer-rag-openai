@@ -20,7 +20,7 @@ logger = logging.getLogger('BengaliFAQ-RAG')
 load_dotenv(verbose=False)
 
 # Constants
-FAQ_DIR = "/Users/ehza/Downloads/beta/faq_data"  # Updated path to match user's directory
+FAQ_DIR = "faq_data"  # Updated path to match user's directory
 FAQ_FILES = [
     "sme_banking.txt",
     "payroll.txt",
