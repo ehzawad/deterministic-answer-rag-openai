@@ -27,7 +27,7 @@ EMBEDDING_CACHE_FILE = os.path.join(CACHE_DIR, "embeddings_cache.pkl")
 CONTENT_CACHE_FILE = os.path.join(CACHE_DIR, "content_cache.pkl")
 FILE_HASH_CACHE = os.path.join(CACHE_DIR, "file_hashes.json")
 MAX_CANDIDATES = 5  # Maximum number of candidates to consider for final answer
-MODEL = "gpt-4.1-mini"     # Updated to use gpt-4.1-mini for answering questions
+MODEL = "gpt-4.1-nano"     # Updated to use gpt-4.1-nano for answering questions
 
 
 class OptimizedBengaliFAQSystem:
@@ -318,8 +318,8 @@ class OptimizedBengaliFAQSystem:
             return []
             
         try:
-            # Use text-embedding-3-large for better multilingual performance
-            logger.info(f"Creating embeddings for {len(questions)} questions using text-embedding-3-large")
+            # Use text-embedding-3-small for better multilingual performance
+            logger.info(f"Creating embeddings for {len(questions)} questions using text-embedding-3-small")
             
             # Process in batches if there are many questions
             MAX_BATCH_SIZE = 100  # Maximum number of texts to embed in one request
@@ -330,7 +330,7 @@ class OptimizedBengaliFAQSystem:
                 logger.info(f"Processing batch {i//MAX_BATCH_SIZE + 1} with {len(batch)} questions")
                 
                 response = self.client.embeddings.create(
-                    model="text-embedding-3-large",
+                    model="text-embedding-3-small",
                     input=batch,
                     dimensions=1024  # Reduced dimensions for efficiency while maintaining quality
                 )
@@ -350,7 +350,7 @@ class OptimizedBengaliFAQSystem:
         """Create embedding for a single query"""
         try:
             response = self.client.embeddings.create(
-                model="text-embedding-3-large",
+                model="text-embedding-3-small",
                 input=[query],
                 dimensions=1024  # Reduced dimensions for efficiency
             )
@@ -529,8 +529,8 @@ class OptimizedBengaliFAQSystem:
                         "message": "No matching FAQ entries found. Please rephrase your question."
                     }
             
-            # Now use GPT-4o-mini to determine which candidate question is semantically most similar
-            logger.info("Using GPT-4o-mini for question-to-question semantic matching...")
+            # Now use GPT-4.1 to determine which candidate question is semantically most similar
+            logger.info("Using GPT-4.1 for question-to-question semantic matching...")
             
             # Create a formatted list of candidate questions
             candidates_text = ""
@@ -553,40 +553,14 @@ MATCH: [just the number of the best question match, e.g., 2]
 CONFIDENCE: [number between 0.0-1.0]
 REASONING: [brief explanation of why you chose this question as the best match]"""
 
-            # Try using the new Responses API first, fallback to Chat Completions if needed
-            try:
-                response = self.client.responses.create(
-                    model="gpt-4o-mini",
-                    input=[
-                        {
-                            "role": "user",
-                            "content": [
-                                {
-                                    "type": "input_text",
-                                    "text": selection_prompt
-                                }
-                            ]
-                        }
-                    ],
-                    temperature=0
-                )
-                result_text = response.output_text
-                logger.info("Successfully used Responses API")
-                
-            except Exception as responses_error:
-                logger.warning(f"Responses API failed: {responses_error}")
-                logger.info("Falling back to Chat Completions API...")
-                
-                # Fallback to Chat Completions API
-                response = self.client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=[
-                        {"role": "user", "content": selection_prompt}
-                    ],
-                    temperature=0
-                )
-                result_text = response.choices[0].message.content
-                logger.info("Successfully used Chat Completions API fallback")
+            # Use the new Responses API with correct simple input format
+            response = self.client.responses.create(
+                model="gpt-4.1-nano",
+                input=selection_prompt,
+                temperature=0
+            )
+            
+            result_text = response.output_text
             
             # Parse the result with improved robustness
             match_num = None
