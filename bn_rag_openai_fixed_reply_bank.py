@@ -33,7 +33,7 @@ EMBEDDING_CACHE_FILE = os.path.join(CACHE_DIR, "embeddings_cache.pkl")
 CONTENT_CACHE_FILE = os.path.join(CACHE_DIR, "content_cache.pkl")
 FILE_HASH_CACHE = os.path.join(CACHE_DIR, "file_hashes.json")
 MAX_CANDIDATES = 5  # Maximum number of candidates to consider for final answer
-MODEL = "gpt-4o"     # Default model for answering questions
+MODEL = "gpt-4.1-mini"     # Default model for answering questions
 
 
 class OptimizedBengaliFAQSystem:
@@ -517,8 +517,8 @@ class OptimizedBengaliFAQSystem:
                         "message": "No matching FAQ entries found. Please rephrase your question."
                     }
             
-            # Now use GPT-4o to determine which candidate question is semantically most similar
-            logger.info("Using GPT-4o for question-to-question semantic matching...")
+            # Now use GPT-4.1-mini to determine which candidate question is semantically most similar
+            logger.info("Using GPT-4.1-mini for question-to-question semantic matching...")
             
             # Create a formatted list of candidate questions
             candidates_text = ""
@@ -543,7 +543,7 @@ REASONING: [brief explanation of why you chose this question as the best match]"
 
             # Get the response from GPT-4o
             response = self.client.responses.create(
-                model="gpt-4o",
+                model="gpt-4.1-mini",
                 input=selection_prompt,
                 temperature=0
             )
@@ -620,7 +620,7 @@ REASONING: [brief explanation of why you chose this question as the best match]"
             # Add debug info if requested
             if debug:
                 result["candidates"] = candidates
-                result["gpt4o_response"] = result_text
+                result["gpt_response"] = result_text
             
             return result
             
@@ -721,9 +721,9 @@ async def main_async():
                         for i, candidate in enumerate(result["candidates"]):
                             print(f"{i+1}. {candidate['question']} (Score: {candidate['score']:.4f})")
                         
-                        if "gpt4o_response" in result:
+                        if "gpt_response" in result:
                             print("\nGPT-4o Analysis:")
-                            print(result["gpt4o_response"])
+                            print(result["gpt_response"])
                 else:
                     print(result.get("message", "No suitable answer found. Please rephrase your question."))
             except KeyboardInterrupt:
