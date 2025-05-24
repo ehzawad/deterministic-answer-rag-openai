@@ -5,6 +5,7 @@ import hashlib
 import asyncio
 import logging
 import traceback
+import glob
 from typing import List, Dict, Optional, Set, Tuple, Any
 from openai import OpenAI
 from dotenv import load_dotenv
@@ -21,19 +22,12 @@ load_dotenv(verbose=False)
 
 # Constants
 FAQ_DIR = "faq_data"  # Updated path to match user's directory
-FAQ_FILES = [
-    "sme_banking.txt",
-    "payroll.txt",
-    "nrb_banking.txt",
-    "retails_products.txt",
-    "women_banking.txt"
-]
 CACHE_DIR = "cache"  # Directory for caching
 EMBEDDING_CACHE_FILE = os.path.join(CACHE_DIR, "embeddings_cache.pkl")
 CONTENT_CACHE_FILE = os.path.join(CACHE_DIR, "content_cache.pkl")
 FILE_HASH_CACHE = os.path.join(CACHE_DIR, "file_hashes.json")
 MAX_CANDIDATES = 5  # Maximum number of candidates to consider for final answer
-MODEL = "gpt-4.1-mini"     # Default model for answering questions
+MODEL = "gpt-4.1-mini"     # Updated to use gpt-4.1-mini for answering questions
 
 
 class OptimizedBengaliFAQSystem:
@@ -51,6 +45,26 @@ class OptimizedBengaliFAQSystem:
         
         # Load cached data if available
         self._load_cache()
+    
+    def _discover_faq_files(self) -> List[str]:
+        """Dynamically discover all .txt files in the FAQ directory"""
+        try:
+            if not os.path.exists(FAQ_DIR):
+                logger.warning(f"FAQ directory '{FAQ_DIR}' does not exist.")
+                return []
+            
+            # Find all .txt files in the FAQ directory
+            txt_files = glob.glob(os.path.join(FAQ_DIR, "*.txt"))
+            
+            # Extract just the filenames (not full paths) for consistency
+            filenames = [os.path.basename(filepath) for filepath in txt_files]
+            
+            logger.info(f"Discovered {len(filenames)} .txt files in {FAQ_DIR}: {filenames}")
+            return filenames
+            
+        except Exception as e:
+            logger.error(f"Error discovering FAQ files: {e}")
+            return []
     
     def _load_cache(self):
         """Load cached FAQ data and embeddings"""
@@ -127,7 +141,10 @@ class OptimizedBengaliFAQSystem:
         """
         files_to_process = set()
         
-        for filename in FAQ_FILES:
+        # Get all discovered FAQ files
+        discovered_files = self._discover_faq_files()
+        
+        for filename in discovered_files:
             filepath = os.path.join(FAQ_DIR, filename)
             if not os.path.exists(filepath):
                 logger.warning(f"Warning: File {filepath} does not exist.")
@@ -394,19 +411,14 @@ class OptimizedBengaliFAQSystem:
                 logger.info(f"Please ensure your FAQ files are in: {FAQ_DIR}")
                 return False
             
-            # Check which FAQ files exist
-            existing_files = []
-            for filename in FAQ_FILES:
-                filepath = os.path.join(FAQ_DIR, filename)
-                if os.path.exists(filepath):
-                    existing_files.append(filename)
-                    logger.info(f"Found FAQ file: {filepath}")
-                else:
-                    logger.warning(f"FAQ file not found: {filepath}")
-            
-            if not existing_files:
-                logger.error("No FAQ files found. Please add FAQ files to the directory.")
+            # Discover all FAQ files dynamically
+            discovered_files = self._discover_faq_files()
+            if not discovered_files:
+                logger.error("No .txt files found in FAQ directory. Please add FAQ files.")
                 return False
+            
+            # Log discovered files
+            logger.info(f"Found {len(discovered_files)} FAQ files: {discovered_files}")
             
             # Check if we need to process any files
             updates_needed, files_to_process = self._check_for_updates()
@@ -418,8 +430,8 @@ class OptimizedBengaliFAQSystem:
             
             # If no files to process or if we need to force processing all files
             if not files_to_process or not self.faq_data:
-                logger.info("Processing all existing files...")
-                files_to_process = set(existing_files)
+                logger.info("Processing all discovered files...")
+                files_to_process = set(discovered_files)
             
             # Process files
             logger.info(f"Processing {len(files_to_process)} files...")
@@ -440,7 +452,7 @@ class OptimizedBengaliFAQSystem:
                         logger.warning(f"No FAQ pairs extracted from {filepath}")
             
             # If we have cached entries, remove entries from files we're updating and add new entries
-            if self.faq_data and files_to_process != set(existing_files):
+            if self.faq_data and files_to_process != set(discovered_files):
                 # Remove old entries from files we're updating
                 self.faq_data = [
                     entry for entry in self.faq_data 
@@ -517,8 +529,8 @@ class OptimizedBengaliFAQSystem:
                         "message": "No matching FAQ entries found. Please rephrase your question."
                     }
             
-            # Now use GPT-4.1-mini to determine which candidate question is semantically most similar
-            logger.info("Using GPT-4.1-mini for question-to-question semantic matching...")
+            # Now use GPT-4o-mini to determine which candidate question is semantically most similar
+            logger.info("Using GPT-4o-mini for question-to-question semantic matching...")
             
             # Create a formatted list of candidate questions
             candidates_text = ""
@@ -541,14 +553,40 @@ MATCH: [just the number of the best question match, e.g., 2]
 CONFIDENCE: [number between 0.0-1.0]
 REASONING: [brief explanation of why you chose this question as the best match]"""
 
-            # Get the response from GPT-4o
-            response = self.client.responses.create(
-                model="gpt-4.1-mini",
-                input=selection_prompt,
-                temperature=0
-            )
-            
-            result_text = response.output_text
+            # Try using the new Responses API first, fallback to Chat Completions if needed
+            try:
+                response = self.client.responses.create(
+                    model="gpt-4o-mini",
+                    input=[
+                        {
+                            "role": "user",
+                            "content": [
+                                {
+                                    "type": "input_text",
+                                    "text": selection_prompt
+                                }
+                            ]
+                        }
+                    ],
+                    temperature=0
+                )
+                result_text = response.output_text
+                logger.info("Successfully used Responses API")
+                
+            except Exception as responses_error:
+                logger.warning(f"Responses API failed: {responses_error}")
+                logger.info("Falling back to Chat Completions API...")
+                
+                # Fallback to Chat Completions API
+                response = self.client.chat.completions.create(
+                    model="gpt-4o-mini",
+                    messages=[
+                        {"role": "user", "content": selection_prompt}
+                    ],
+                    temperature=0
+                )
+                result_text = response.choices[0].message.content
+                logger.info("Successfully used Chat Completions API fallback")
             
             # Parse the result with improved robustness
             match_num = None
@@ -722,7 +760,7 @@ async def main_async():
                             print(f"{i+1}. {candidate['question']} (Score: {candidate['score']:.4f})")
                         
                         if "gpt_response" in result:
-                            print("\nGPT-4o Analysis:")
+                            print("\nGPT Analysis:")
                             print(result["gpt_response"])
                 else:
                     print(result.get("message", "No suitable answer found. Please rephrase your question."))
