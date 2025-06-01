@@ -326,12 +326,23 @@ class BengaliFAQService:
         try:
             collection_name = self._get_collection_name(filename)
             
-            # Delete existing collection if it exists
-            try:
-                self.chroma_client.delete_collection(collection_name)
-                logger.info(f"Deleted existing collection: {collection_name}")
-            except Exception:
-                pass  # Collection doesn't exist, which is fine
+            # 🛠️ Check if collection exists before trying to delete it
+            max_attempts = 3
+            for attempt in range(max_attempts):
+                try:
+                    # Check if collection exists first
+                    existing_collections = [coll.name for coll in self.chroma_client.list_collections()]
+                    if collection_name in existing_collections:
+                        self.chroma_client.delete_collection(collection_name)
+                        logger.info(f"Deleted existing collection: {collection_name}")
+                    else:
+                        logger.debug(f"Collection {collection_name} doesn't exist, skipping deletion")
+                    break
+                except Exception as e:
+                    if attempt == max_attempts - 1:
+                        logger.warning(f"Could not delete collection {collection_name}: {e}")
+                    else:
+                        logger.debug(f"Retry {attempt + 1} deleting collection {collection_name}")
             
             # Create new collection
             collection = self.chroma_client.create_collection(
@@ -351,23 +362,36 @@ class BengaliFAQService:
                 logger.error(f"Embedding count mismatch for {filename}")
                 return
             
-            # Add to collection
-            ids = [f"{filename}_{i}" for i in range(len(faq_pairs))]
-            metadatas = [
-                {
-                    "question": pair["question"],
-                    "answer": pair["answer"], 
-                    "source": pair["source"]
-                }
-                for pair in faq_pairs
-            ]
+            # 🛠️ Safer batch addition - add in smaller chunks to prevent corruption
+            batch_size = 50  # Smaller batches are more reliable
             
-            collection.add(
-                ids=ids,
-                embeddings=embeddings,
-                documents=questions,  # Store questions as documents
-                metadatas=metadatas
-            )
+            for i in range(0, len(faq_pairs), batch_size):
+                batch_end = min(i + batch_size, len(faq_pairs))
+                batch_pairs = faq_pairs[i:batch_end]
+                batch_embeddings = embeddings[i:batch_end]
+                batch_questions = questions[i:batch_end]
+                
+                ids = [f"{filename}_{j}" for j in range(i, batch_end)]
+                metadatas = [
+                    {
+                        "question": pair["question"],
+                        "answer": pair["answer"], 
+                        "source": pair["source"]
+                    }
+                    for pair in batch_pairs
+                ]
+                
+                try:
+                    collection.add(
+                        ids=ids,
+                        embeddings=batch_embeddings,
+                        documents=batch_questions,
+                        metadatas=metadatas
+                    )
+                    logger.debug(f"Added batch {i//batch_size + 1} to {collection_name}")
+                except Exception as batch_error:
+                    logger.error(f"Error adding batch to {collection_name}: {batch_error}")
+                    raise  # Re-raise to trigger collection rebuild
             
             logger.info(f"Added {len(faq_pairs)} entries to collection {collection_name}")
             
@@ -506,8 +530,58 @@ class BengaliFAQService:
             return candidates
             
         except Exception as e:
+            # 🛠️ ChromaDB Error Recovery
+            error_msg = str(e).lower()
+            if "hnsw segment reader" in error_msg or "nothing found on disk" in error_msg:
+                logger.warning(f"ChromaDB corruption detected in {collection_name}, attempting recovery...")
+                try:
+                    # Try to recover by rebuilding this specific collection
+                    if self._recover_collection(collection_name):
+                        logger.info(f"Successfully recovered {collection_name}, retrying search...")
+                        # Retry the search once after recovery
+                        return self._search_collection_with_embedding(collection_name, query, query_embedding, n_results)
+                except Exception as recovery_error:
+                    logger.error(f"Collection recovery failed for {collection_name}: {recovery_error}")
+            
             logger.error(f"Error searching collection {collection_name}: {e}")
             return []
+    
+    def _recover_collection(self, collection_name: str) -> bool:
+        """🛠️ Simple recovery for corrupted ChromaDB collection"""
+        try:
+            # Find the source file for this collection
+            file_mapping = {v: k for k, v in FILE_TO_COLLECTION.items()}
+            source_filename = None
+            
+            for filename, coll_type in FILE_TO_COLLECTION.items():
+                if f"faq_{coll_type}" == collection_name:
+                    source_filename = filename
+                    break
+            
+            if not source_filename:
+                logger.error(f"No source file found for collection {collection_name}")
+                return False
+            
+            # Delete corrupted collection
+            try:
+                self.chroma_client.delete_collection(collection_name)
+                logger.info(f"Deleted corrupted collection: {collection_name}")
+            except Exception:
+                pass  # Collection might not exist
+            
+            # Rebuild from source file
+            filepath = os.path.join(FAQ_DIR, source_filename)
+            if os.path.exists(filepath):
+                logger.info(f"Rebuilding {collection_name} from {source_filename}")
+                faq_pairs = self._preprocess_faq_file(filepath)
+                if faq_pairs:
+                    self._update_collection(source_filename, faq_pairs)
+                    return True
+            
+            return False
+        except Exception as e:
+            logger.error(f"Error recovering collection {collection_name}: {e}")
+            return False
     
     def _search_all_collections(self, query: str) -> List[Dict]:
         """Search across all collections when no prime words detected (creates new embedding - use _search_all_collections_with_embedding for efficiency)"""
@@ -535,14 +609,23 @@ class BengaliFAQService:
     def _search_all_collections_with_embedding(self, query: str, query_embedding: List[List[float]]) -> List[Dict]:
         """EFFICIENT: Search across all collections using pre-computed embedding"""
         all_candidates = []
+        failed_collections = []
         
         try:
             collections = self.chroma_client.list_collections()
             for collection in collections:
                 candidates = self._search_collection_with_embedding(collection.name, query, query_embedding, MAX_CANDIDATES)
-                all_candidates.extend(candidates)
+                if candidates:
+                    all_candidates.extend(candidates)
+                else:
+                    failed_collections.append(collection.name)
+                    
         except Exception as e:
             logger.error(f"Error searching all collections: {e}")
+        
+        # 🛠️ Log any completely failed collections (optional recovery could go here)
+        if failed_collections:
+            logger.warning(f"Failed to search collections: {failed_collections}")
         
         # Sort by similarity score and return top candidates
         all_candidates.sort(key=lambda x: x['score'], reverse=True)
@@ -884,15 +967,28 @@ class BengaliFAQService:
             updates_needed, files_to_process = self._check_for_updates()
             
             if not updates_needed:
-                # Check if collections exist AND have data
+                # Check if collections exist AND have data (WITHOUT triggering ONNX downloads)
                 try:
                     collections = self.chroma_client.list_collections()
                     if collections:
-                        # Check if collections actually have data
                         total_entries = 0
+                        
                         for collection in collections:
-                            coll = self.chroma_client.get_collection(collection.name)
-                            total_entries += coll.count()
+                            try:
+                                coll = self.chroma_client.get_collection(collection.name)
+                                count = coll.count()
+                                total_entries += count
+                                
+                                # 🛠️ REMOVED: No more test queries that trigger ONNX downloads!
+                                # The corruption detection will happen during actual searches only
+                                    
+                            except Exception as e:
+                                logger.warning(f"Error checking collection {collection.name}: {e}")
+                                # Mark this collection for rebuilding if there's an issue
+                                for filename, coll_type in FILE_TO_COLLECTION.items():
+                                    if f"faq_{coll_type}" == collection.name:
+                                        files_to_process.add(filename)
+                                        break
                         
                         if total_entries > 0:
                             logger.info(f"No updates needed. Using existing ChromaDB collections with {total_entries} total entries.")
@@ -904,8 +1000,9 @@ class BengaliFAQService:
                     else:
                         logger.info("No existing collections found, processing all files.")
                         files_to_process = set(discovered_files)
-                except Exception:
-                    logger.info("Error checking existing collections, processing all files.")
+                        
+                except Exception as e:
+                    logger.warning(f"Error checking existing collections: {e}, processing all files.")
                     files_to_process = set(discovered_files)
             
             if not files_to_process:
@@ -1027,6 +1124,50 @@ class BengaliFAQService:
         except Exception as e:
             logger.error(f"Error getting system stats: {e}")
             return {"error": str(e)}
+
+    def health_check(self) -> Dict:
+        """🛠️ Simple health check for ChromaDB collections"""
+        try:
+            if not self.initialized:
+                return {"status": "error", "message": "Service not initialized"}
+            
+            collections = self.chroma_client.list_collections()
+            healthy_collections = []
+            corrupted_collections = []
+            
+            for collection in collections:
+                try:
+                    coll = self.chroma_client.get_collection(collection.name)
+                    count = coll.count()
+                    
+                    # 🛠️ REMOVED: No test query to avoid triggering ONNX downloads
+                    # Corruption will be detected during actual searches only
+                    
+                    healthy_collections.append({
+                        "name": collection.name,
+                        "count": count
+                    })
+                    
+                except Exception as e:
+                    corrupted_collections.append({
+                        "name": collection.name,
+                        "error": str(e)
+                    })
+            
+            status = "healthy" if not corrupted_collections else "degraded"
+            
+            return {
+                "status": status,
+                "healthy_collections": len(healthy_collections),
+                "corrupted_collections": len(corrupted_collections),
+                "details": {
+                    "healthy": healthy_collections,
+                    "corrupted": corrupted_collections
+                }
+            }
+            
+        except Exception as e:
+            return {"status": "error", "message": f"Health check failed: {e}"}
 
 # Global service instance - auto-initialize on import
 faq_service = BengaliFAQService()

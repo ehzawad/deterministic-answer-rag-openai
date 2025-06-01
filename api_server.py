@@ -65,15 +65,41 @@ def health_check():
                 "timestamp": datetime.now().isoformat()
             }, 503)
         
+        # 🛠️ Enhanced health check with ChromaDB corruption detection
+        health_info = faq_service.health_check()
         stats = faq_service.get_system_stats()
-        return unicode_jsonify({
-            "status": "healthy",
+        
+        # Determine overall status
+        overall_status = "healthy"
+        status_code = 200
+        
+        if health_info["status"] == "error":
+            overall_status = "error"
+            status_code = 500
+        elif health_info["status"] == "degraded":
+            overall_status = "degraded"
+            status_code = 200  # Still functional, just degraded
+        
+        response = {
+            "status": overall_status,
             "service_initialized": faq_service.initialized,
             "test_mode": stats.get('test_mode', False),
-            "collections": stats.get('total_collections', 0),
+            "collections": {
+                "total": stats.get('total_collections', 0),
+                "healthy": health_info.get('healthy_collections', 0),
+                "corrupted": health_info.get('corrupted_collections', 0)
+            },
             "total_entries": sum(c['count'] for c in stats.get('collections', {}).values()),
             "timestamp": datetime.now().isoformat()
-        })
+        }
+        
+        # Add corruption details if any found
+        if health_info.get('corrupted_collections', 0) > 0:
+            response["corruption_details"] = health_info.get('details', {}).get('corrupted', [])
+            response["message"] = f"Found {health_info['corrupted_collections']} corrupted collections"
+        
+        return unicode_jsonify(response, status_code)
+        
     except Exception as e:
         api_logger.error(f"Health check error: {e}")
         return unicode_jsonify({
