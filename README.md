@@ -1,4 +1,4 @@
-# 🔥 Bengali FAQ Ultra-Precision RAG System
+## Bengali FAQ predefined Q/A RAG System
 
 **Production-ready Bengali FAQ system with ultra-precision hybrid matching and cross-collection disambiguation.**
 
@@ -462,11 +462,11 @@ The system uses `config.json` for all configuration settings. Edit this file to 
 
 ## 🛠️ Requirements
 
-- **Python**: 3.8+
+- **Python**: 3.12
 - **OpenAI API**: For embeddings
 - **ChromaDB**: Vector storage
 - **Dependencies**: Listed in `requirements.txt`
 
 ---
 
-**Built with ultra-precision algorithms for production Bengali FAQ systems** 🇧🇩 
+**** Deterministic RAG system for predefined Bengali FAQ systems**
