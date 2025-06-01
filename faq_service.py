@@ -388,6 +388,18 @@ class BengaliFAQService:
         
         return list(set(detected_collections))  # Remove duplicates
     
+    def _detect_prime_words_cached(self, query_lower: str) -> List[str]:
+        """SPEED OPTIMIZED: Detect prime words using pre-lowercased query"""
+        detected_collections = []
+        
+        for collection_type, prime_words in PRIME_WORDS.items():
+            for prime_word in prime_words:
+                if prime_word.lower() in query_lower:
+                    detected_collections.append(collection_type)
+                    break
+        
+        return list(set(detected_collections))  # Remove duplicates
+    
     def _test_mode_search(self, collection, query: str, n_results: int) -> List[Dict]:
         """Simple text-based search for test mode"""
         try:
@@ -538,7 +550,7 @@ class BengaliFAQService:
     
     def _find_best_match(self, query: str) -> Tuple[Optional[Dict], List[Dict]]:
         """Find the best match using two-stage routing with hybrid matching and cross-collection disambiguation"""
-        # Clean the query for consistent matching
+        # SPEED OPTIMIZATION: Cache repeated calculations within same query
         cleaned_query = self._clean_text(query)
         
         # EFFICIENCY: Create query embedding ONCE and reuse
@@ -549,11 +561,12 @@ class BengaliFAQService:
                 logger.error("Failed to create query embedding")
                 return None, []
         
-        # Stage 1: Intent detection for banking type disambiguation
-        intent_context = self._detect_banking_intent(query)
+        # Stage 1: Intent detection (cache query_lower for reuse)
+        query_lower = query.lower()
+        intent_context = self._detect_banking_intent_cached(query_lower)
         
-        # Stage 2: Prime word detection
-        detected_collections = self._detect_prime_words(query)
+        # Stage 2: Prime word detection (reuse query_lower)
+        detected_collections = self._detect_prime_words_cached(query_lower)
         
         all_candidates = []
         search_all_needed = False
@@ -566,17 +579,24 @@ class BengaliFAQService:
                 candidates = self._search_collection_with_embedding(collection_name, query, query_embedding)
                 all_candidates.extend(candidates)
             
+            # SPEED OPTIMIZATION: Early exit for high-confidence matches
             # Check if we should also search all collections
-            # This handles cases with multiple prime words or weak matches
-            if len(detected_collections) > 1:
-                logger.info("Multiple collections detected, will also search all collections")
-                search_all_needed = True
-            elif all_candidates:
-                # Check if best candidate from targeted search is weak
+            if all_candidates:
                 best_targeted_score = max(c['score'] for c in all_candidates)
-                if best_targeted_score < 0.7:  # If best targeted match is weak
+                
+                # EARLY EXIT: If we have very high confidence match, skip searching all collections
+                if best_targeted_score >= 0.95:
+                    logger.info(f"High confidence match found ({best_targeted_score:.3f}), skipping all-collection search")
+                    search_all_needed = False
+                elif len(detected_collections) > 1:
+                    logger.info("Multiple collections detected, will also search all collections")
+                    search_all_needed = True
+                elif best_targeted_score < 0.7:  # If best targeted match is weak
                     logger.info(f"Best targeted match score {best_targeted_score:.3f} is weak, will also search all collections")
                     search_all_needed = True
+            elif len(detected_collections) > 1:
+                logger.info("Multiple collections detected, will also search all collections")
+                search_all_needed = True
         else:
             search_all_needed = True
         
@@ -606,7 +626,7 @@ class BengaliFAQService:
         
         # ULTRA-ADVANCED: Cross-collection disambiguation and authority scoring
         all_candidates = self._apply_cross_collection_disambiguation(
-            all_candidates, query, intent_context
+            all_candidates, query_lower, intent_context
         )
         
         # Dynamic threshold calculation based on cross-collection ambiguity
@@ -621,8 +641,10 @@ class BengaliFAQService:
     
     def _detect_banking_intent(self, query: str) -> Dict:
         """Detect Islamic vs Conventional banking intent from query"""
-        query_lower = query.lower()
-        
+        return self._detect_banking_intent_cached(query.lower())
+    
+    def _detect_banking_intent_cached(self, query_lower: str) -> Dict:
+        """SPEED OPTIMIZED: Detect banking intent using pre-lowercased query"""
         islamic_indicators = [
             "ইয়াকিন", "ইসলামিক", "শরিয়া", "হালাল", "মুদারাবা", 
             "উজরা", "মুরাবাহা", "বাই", "অঘনিয়া", "আগানিয়া"
@@ -662,7 +684,7 @@ class BengaliFAQService:
             'confidence': max(islamic_intent, conventional_intent)
         }
     
-    def _apply_cross_collection_disambiguation(self, candidates: List[Dict], query: str, intent_context: Dict) -> List[Dict]:
+    def _apply_cross_collection_disambiguation(self, candidates: List[Dict], query_lower: str, intent_context: Dict) -> List[Dict]:
         """Apply cross-collection disambiguation with authority scoring"""
         if len(candidates) <= 1:
             return candidates
@@ -675,9 +697,9 @@ class BengaliFAQService:
                 logger.info(f"Found {len(group)} similar candidates across collections, applying disambiguation")
                 
                 for candidate in group:
-                    # Calculate authority score based on intent
+                    # Calculate authority score based on intent (using cached query_lower)
                     authority_multiplier = self._calculate_authority_score(
-                        candidate, intent_context, query
+                        candidate, intent_context, query_lower
                     )
                     
                     # Apply authority multiplier to similarity score
@@ -749,8 +771,8 @@ class BengaliFAQService:
         
         return combined_similarity
     
-    def _calculate_authority_score(self, candidate: Dict, intent_context: Dict, query: str) -> float:
-        """Calculate authority score for cross-collection disambiguation"""
+    def _calculate_authority_score(self, candidate: Dict, intent_context: Dict, query_lower: str) -> float:
+        """SPEED OPTIMIZED: Calculate authority score using pre-lowercased query"""
         base_multiplier = 1.0
         collection = candidate['collection']
         
@@ -767,8 +789,7 @@ class BengaliFAQService:
             elif collection == 'faq_yaqeen':
                 base_multiplier = 0.8  # Slight penalty for Islamic when conventional intended
                 
-        # Product name exact match bonus
-        query_lower = query.lower()
+        # Product name exact match bonus (using cached query_lower)
         question_lower = candidate['question'].lower()
         
         # Check for exact product name matches
