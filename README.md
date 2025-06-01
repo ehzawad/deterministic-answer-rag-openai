@@ -11,14 +11,6 @@
 - **🌍 Bengali Text Processing**: Advanced normalization and domain-specific phrase matching
 - **🔀 Multiple Interfaces**: REST API, batch processing, and interactive CLI
 
-## 📊 Performance
-
-| Metric | Score |
-|--------|-------|
-| **Match Accuracy** | 90%+ |
-| **API Efficiency** | 91% fewer embedding calls |
-| **Cross-Collection Precision** | PhD-level disambiguation |
-| **Bengali Text Support** | Full Unicode with normalization |
 
 ## 🚀 Quick Start
 
@@ -453,12 +445,13 @@ The system uses `config.json` for all configuration settings. Edit this file to 
 - **directories**: FAQ data and cache locations
 - **logging**: System log level (DEBUG, INFO, WARNING, ERROR)
 
-## 📈 System Stats
+## 📈 System Stats (this is subject to changes)
 
 - **Total Collections**: 9 (one per FAQ domain)
 - **Total Questions**: 338+ across all domains
 - **Supported Languages**: Bengali (primary), English (fallback)
 - **Embedding Dimensions**: 1024 (text-embedding-3-large)
+- **RunTime Model**: gpt-4.1-nano
 
 ## 🛠️ Requirements
 
