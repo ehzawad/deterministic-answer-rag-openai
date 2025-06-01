@@ -34,7 +34,7 @@ git clone <repository>
 cd deterministic-answer-rag-openai
 
 # Install dependencies
-pip install -r requirements.txt
+pip install -r requirements.txt --no-deps
 
 # Set your OpenAI API key
 export OPENAI_API_KEY="your_api_key_here"
