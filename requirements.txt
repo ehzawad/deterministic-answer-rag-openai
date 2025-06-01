@@ -4,6 +4,7 @@ asttokens==3.0.0
 blinker==1.9.0
 certifi==2025.1.31
 charset-normalizer==3.4.1
+chromadb==0.5.23
 click==8.1.8
 colorama==0.4.6
 comm==0.2.2
@@ -12,6 +13,7 @@ decorator==5.2.1
 distro==1.9.0
 executing==2.2.0
 Flask==3.1.0
+Flask-CORS==5.0.0
 griffe==1.7.2
 h11==0.14.0
 httpcore==1.0.7
