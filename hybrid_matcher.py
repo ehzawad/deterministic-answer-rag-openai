@@ -348,7 +348,7 @@ class HybridMatcher:
         # Boost if important collection-specific terms appear in sequence
         important_sequences = {
             'faq_yaqeen': ['ইয়াকিন', 'ইসলামিক'],
-            'faq_retail': ['এমটিবি', 'রেগুলার'],
+            'faq_retail': ['রেগুলার'],
         }
         
         sequence_boost = 0.0
