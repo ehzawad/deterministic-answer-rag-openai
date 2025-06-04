@@ -9,6 +9,7 @@
 - **🧠 Cross-Collection Disambiguation**: Authority scoring prevents Islamic vs Conventional banking confusion
 - **⚡ Embedding Efficiency**: 1 API call per query (vs 11+ in naive implementations)
 - **🌍 Bengali Text Processing**: Advanced normalization and domain-specific phrase matching
+- **🔡 Typo Tolerance**: Fuzzy edit-distance matching handles misspellings
 - **🔀 Multiple Interfaces**: REST API, batch processing, and interactive CLI
 
 
@@ -375,6 +376,16 @@ Debug output includes:
 - Confidence thresholds
 - Hybrid matching details
 
+### Self-Testing Scripts
+
+Use these helper scripts to validate matching quality:
+
+- `self_test.py` runs up to 20 training questions and reports accuracy.
+- `variant_test.py` creates slight variants of the training questions to
+  test typo tolerance and semantic matching behaviour.
+
+Each script saves a JSON results file with detailed scoring metrics.
+
 ## 🔧 Core Components
 
 | File | Purpose |
@@ -394,6 +405,7 @@ Debug output includes:
 - **N-gram weighting**: Collection-aware bigram/trigram importance
 - **Sequential pattern recognition**: Word order significance
 - **Negative keyword penalties**: Prevents wrong collection matches
+- **Edit-distance matching**: Levenshtein similarity for typos
 
 ### Embedding Efficiency
 - **Query embedding caching**: Create once, reuse across all collections
