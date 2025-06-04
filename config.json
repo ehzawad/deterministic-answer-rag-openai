@@ -14,12 +14,13 @@
   "logging": {
     "level": "INFO"
   },
-  "matcher_weights": {
-    "exact_match": 1.0,
-    "cleaned_match": 0.95,
-    "ngram_match": 0.4,
-    "keyword_match": 0.7,
-    "embedding": 0.8,
-    "boost_factor": 0.15
+    "matcher_weights": {
+      "exact_match": 1.0,
+      "cleaned_match": 0.95,
+      "ngram_match": 0.4,
+      "keyword_match": 0.7,
+      "edit_distance": 0.6,
+      "embedding": 0.8,
+      "boost_factor": 0.15
+    }
   }
-}
