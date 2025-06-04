@@ -6,6 +6,7 @@ import logging
 import traceback
 import glob
 import re
+from functools import lru_cache
 from typing import List, Dict, Optional, Set, Tuple, Any
 from openai import OpenAI
 import chromadb
@@ -401,27 +402,19 @@ class BengaliFAQService:
     
     def _detect_prime_words(self, query: str) -> List[str]:
         """Detect prime words in query to determine target collections"""
-        detected_collections = []
-        query_lower = query.lower()
-        
-        for collection_type, prime_words in PRIME_WORDS.items():
-            for prime_word in prime_words:
-                if prime_word.lower() in query_lower:
-                    detected_collections.append(collection_type)
-                    break
-        
-        return list(set(detected_collections))  # Remove duplicates
-    
+        return self._detect_prime_words_cached(query.lower())
+
+    @lru_cache(maxsize=256)
     def _detect_prime_words_cached(self, query_lower: str) -> List[str]:
         """SPEED OPTIMIZED: Detect prime words using pre-lowercased query"""
         detected_collections = []
-        
+
         for collection_type, prime_words in PRIME_WORDS.items():
             for prime_word in prime_words:
                 if prime_word.lower() in query_lower:
                     detected_collections.append(collection_type)
                     break
-        
+
         return list(set(detected_collections))  # Remove duplicates
     
     def _test_mode_search(self, collection, query: str, n_results: int) -> List[Dict]:
@@ -726,6 +719,7 @@ class BengaliFAQService:
         """Detect Islamic vs Conventional banking intent from query"""
         return self._detect_banking_intent_cached(query.lower())
     
+    @lru_cache(maxsize=256)
     def _detect_banking_intent_cached(self, query_lower: str) -> Dict:
         """SPEED OPTIMIZED: Detect banking intent using pre-lowercased query"""
         islamic_indicators = [
@@ -1094,13 +1088,7 @@ class BengaliFAQService:
     
     def answer_query(self, query: str, debug: bool = False) -> Dict:
         """Synchronous wrapper for answer_query_async"""
-        loop = asyncio.new_event_loop()
-        try:
-            return loop.run_until_complete(
-                self.answer_query_async(query, debug)
-            )
-        finally:
-            loop.close()
+        return asyncio.run(self.answer_query_async(query, debug))
     
     def get_system_stats(self) -> Dict:
         """Get system statistics"""
@@ -1182,4 +1170,4 @@ else:
     logger.error("❌ Bengali FAQ Service initialization failed!")
 
 # Export the service instance
-__all__ = ['faq_service'] 
+__all__ = ['faq_service']

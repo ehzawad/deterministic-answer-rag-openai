@@ -3,3 +3,6 @@ __pycache__
 cache
 .env
 batch_results*
+self_test_results.json
+variant_test_results.json
+venv

@@ -13,6 +13,7 @@ semantics, providing reasonable scores for contextually similar questions.
 
 import re
 import logging
+from functools import lru_cache
 from typing import List, Dict, Tuple, Set, Optional, Any
 from collections import Counter
 import numpy as np
@@ -33,6 +34,7 @@ class HybridMatcher:
             'keyword_match': 0.7,   # Weight for keyword matching score (increased)
             'embedding': 0.8,       # Weight for embedding similarity (increased)
             'phrase_match': 0.6,    # Weight for phrase matching
+            'edit_distance': 0.6,   # Weight for edit-distance similarity
             'boost_factor': 0.15    # Boost factor for strong non-exact matches
         }
         
@@ -382,6 +384,7 @@ class HybridMatcher:
             'ngram_match': 0.0,
             'keyword_match': 0.0,
             'phrase_match': 0.0,
+            'edit_distance': 0.0,
             'embedding': embedding_similarity or 0.0,
             'final_score': 0.0
         }
@@ -399,15 +402,21 @@ class HybridMatcher:
             result['ngram_match'] = self._calculate_ngram_similarity(
                 query.lower(), faq_question.lower()
             )
-            
+
             # Calculate keyword similarity
             result['keyword_match'] = self._calculate_keyword_similarity(
                 query.lower(), faq_question.lower()
             )
-            
+
             # Calculate phrase-based matching for banking domain
             result['phrase_match'] = self._calculate_phrase_similarity(
                 query.lower(), faq_question.lower()
+            )
+
+        # Edit distance similarity (helps with typos)
+        if result['exact_match'] < 1.0:
+            result['edit_distance'] = self._calculate_edit_distance_similarity(
+                query, faq_question
             )
         
         # Calculate weighted score
@@ -417,6 +426,7 @@ class HybridMatcher:
             result['ngram_match'] * self.weights['ngram_match'],
             result['keyword_match'] * self.weights['keyword_match'],
             result['phrase_match'] * self.weights['phrase_match'],
+            result['edit_distance'] * self.weights['edit_distance'],
             result['embedding'] * self.weights['embedding']
         ])
         
@@ -426,6 +436,7 @@ class HybridMatcher:
             self.weights['ngram_match'],
             self.weights['keyword_match'],
             self.weights['phrase_match'] if result['phrase_match'] > 0 else 0,
+            self.weights['edit_distance'],
             self.weights['embedding'] if embedding_similarity is not None else 0
         ])
         
@@ -484,14 +495,15 @@ class HybridMatcher:
             
         return result
     
-    def _calculate_ngram_similarity(self, text1: str, text2: str, n_values: list = None) -> float:
+    @lru_cache(maxsize=1024)
+    def _calculate_ngram_similarity(self, text1: str, text2: str, n_values: tuple = (2, 3)) -> float:
         """Calculate n-gram similarity between two texts using multiple n-gram sizes"""
         if not text1 or not text2:
             return 0.0
-        
-        # Default to using bigrams and trigrams    
-        if n_values is None:
-            n_values = [2, 3]
+
+        # Convert to tuple for caching
+        if not isinstance(n_values, tuple):
+            n_values = tuple(n_values)
             
         # Clean texts for more effective n-gram matching
         # Remove extra spaces and normalize Bengali characters
@@ -521,7 +533,7 @@ class HybridMatcher:
             ngrams2 = set(get_ngrams(t2, n))
             
             if not ngrams1 or not ngrams2:
-                similarities.append(0.0)
+                similarities.append((0.0, importance_weights.get(n, 0.5)))
                 continue
                 
             # Calculate weighted Jaccard similarity
@@ -591,8 +603,19 @@ class HybridMatcher:
         # Combine weighted and coverage scores
         similarity = (weighted_intersection / total_weight) if total_weight > 0 else 0
         combined_score = 0.7 * similarity + 0.3 * term_coverage
-        
+
         return combined_score
+
+    @lru_cache(maxsize=1024)
+    def _calculate_edit_distance_similarity(self, text1: str, text2: str) -> float:
+        """Calculate normalized edit-distance similarity using SequenceMatcher"""
+        if not text1 or not text2:
+            return 0.0
+
+        from difflib import SequenceMatcher
+
+        ratio = SequenceMatcher(None, text1.lower(), text2.lower()).ratio()
+        return ratio
         
     def _calculate_phrase_similarity(self, text1: str, text2: str) -> float:
         """Calculate phrase-based similarity for banking domain"""
@@ -652,7 +675,8 @@ class HybridMatcher:
         
         return final_score
         
-    def _calculate_collection_aware_ngram_similarity(self, text1: str, text2: str, collection: str = None, n_values: list = None) -> float:
+    @lru_cache(maxsize=1024)
+    def _calculate_collection_aware_ngram_similarity(self, text1: str, text2: str, collection: str = None, n_values: tuple = (2, 3)) -> float:
         """ULTRA-PRECISION: Calculate collection-aware n-gram similarity"""
         if not text1 or not text2:
             return 0.0
@@ -664,8 +688,8 @@ class HybridMatcher:
             weights = self.collection_ngram_weights['default']
         
         # Default to using bigrams and trigrams    
-        if n_values is None:
-            n_values = [2, 3]
+        if not isinstance(n_values, tuple):
+            n_values = tuple(n_values)
             
         # Clean texts for more effective n-gram matching
         t1 = re.sub(r'\s+', ' ', text1.lower().strip())
