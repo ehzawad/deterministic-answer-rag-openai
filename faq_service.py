@@ -275,19 +275,22 @@ class BengaliFAQService:
             'অটো টেলার': 'এটিএম'
         }
         
-        # Normalize Yaqeen spelling variations
-        yaqeen_variations = {
+        # Normalize common spelling variations and typos
+        spelling_variations = {
             'ইয়াকি': 'ইয়াকিন',
             'আগানিয়া': 'অঘনিয়া',
             'এমটিবি': 'এমটিবি',
             'মুতুয়াল': 'মিউচুয়াল',
-            'পেয়রোল': 'পেরোল'
+            'পেয়রোল': 'পেরোল',
+            'অ্যাকাউট': 'অ্যাকাউন্ট',  # Fix typo in payroll FAQ
+            'রেগুলার অ্যাকাউট': 'রেগুলার অ্যাকাউন্ট',
+            'পেরোল অ্যাকাউট': 'পেরোল অ্যাকাউন্ট'
         }
         
         for eng_term, bengali_term in banking_terms.items():
             text = text.replace(eng_term, bengali_term)
             
-        for variation, standard in yaqeen_variations.items():
+        for variation, standard in spelling_variations.items():
             text = text.replace(variation, standard)
         
         # Remove account numbers (sequences of 8+ digits)
@@ -631,8 +634,107 @@ class BengaliFAQService:
         all_candidates.sort(key=lambda x: x['score'], reverse=True)
         return all_candidates[:MAX_CANDIDATES]
     
+    def _llm_semantic_rerank(self, query: str, candidates: List[Dict]) -> List[Dict]:
+        """Use LLM to semantically rerank candidates for better semantic understanding"""
+        if not candidates or self.test_mode or not self.client:
+            return candidates
+        
+        # ENHANCED: Always try LLM reranking for better semantic matches, even with single candidates
+        # This helps with edge cases where embeddings miss semantic similarity
+        
+        try:
+            # Prepare context with query + top candidates (limit to top 8 for context efficiency)
+            top_candidates = candidates[:8]
+            context = f"Query: {query}\n\nFAQ Options:\n"
+            
+            for i, candidate in enumerate(top_candidates):
+                context += f"{i+1}. Q: {candidate['question']}\n   A: {candidate['answer'][:200]}...\n   Source: {candidate['source']}\n\n"
+            
+            prompt = f"""You are a Bengali banking FAQ expert. Given this query and FAQ options, rank them by SEMANTIC SIMILARITY, not exact word matching.
+
+CRITICAL Bengali Banking Equivalencies:
+- সুদের হার = ইন্টারেস্ট রেট = ইন্টারসেট রেট = রেট (ALL mean interest rate)
+- শাখায় যেতে = ব্রাঞ্চে যেতে ≠ অনলাইনে (branch visit vs online)
+- একাউন্ট = অ্যাকাউন্ট = হিসাব (account variations)
+- পেরোল = স্যালারি = বেতন (payroll/salary)
+- চার্জ = ফি = খরচ (fees/charges)
+- কার্ডের ফি = কার্ড এর চার্জ (card fees)
+
+PRIORITIZE SEMANTIC MEANING OVER EXACT WORDS.
+Example: "সুদের হার কত?" should match "ইন্টারসেট রেট কত?" very highly.
+
+{context}
+
+Return ONLY the numbers (1-{len(top_candidates)}) in order of BEST SEMANTIC MATCH (meaning similarity), separated by commas.
+Example: 3,1,5,2,4"""
+            
+            # Call LLM for semantic ranking with fallback models
+            models_to_try = [
+                config['models'].get('core_model', 'gpt-3.5-turbo'),
+                'gpt-4',
+                'gpt-4-turbo',
+                'gpt-3.5-turbo-0125'
+            ]
+            
+            response = None
+            for model in models_to_try:
+                try:
+                    response = self.client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {"role": "user", "content": prompt}
+                        ],
+                        max_tokens=50,
+                        temperature=0.1
+                    )
+                    logger.debug(f"Successfully used model: {model}")
+                    break
+                except Exception as model_error:
+                    logger.debug(f"Model {model} failed: {model_error}")
+                    continue
+            
+            if not response:
+                logger.warning("All LLM models failed, falling back to original ranking")
+                return candidates
+            
+            ranking_text = response.choices[0].message.content.strip()
+            logger.debug(f"LLM ranking response: {ranking_text}")
+            
+            # Parse the ranking
+            try:
+                rankings = [int(x.strip()) - 1 for x in ranking_text.split(',') if x.strip().isdigit()]
+                
+                # Reorder candidates based on LLM ranking
+                reranked = []
+                used_indices = set()
+                
+                for rank_idx in rankings:
+                    if 0 <= rank_idx < len(top_candidates) and rank_idx not in used_indices:
+                        reranked.append(top_candidates[rank_idx])
+                        used_indices.add(rank_idx)
+                
+                # Add any remaining candidates
+                for i, candidate in enumerate(top_candidates):
+                    if i not in used_indices:
+                        reranked.append(candidate)
+                
+                # Add remaining original candidates that weren't in top 8
+                if len(candidates) > 8:
+                    reranked.extend(candidates[8:])
+                
+                logger.info(f"LLM reranked {len(top_candidates)} candidates")
+                return reranked
+                
+            except (ValueError, IndexError) as e:
+                logger.warning(f"Error parsing LLM ranking '{ranking_text}': {e}")
+                return candidates
+                
+        except Exception as e:
+            logger.error(f"Error in LLM semantic reranking: {e}")
+            return candidates
+    
     def _find_best_match(self, query: str) -> Tuple[Optional[Dict], List[Dict]]:
-        """Find the best match using two-stage routing with hybrid matching and cross-collection disambiguation"""
+        """Find the best match using two-stage routing with hybrid matching and LLM semantic reranking"""
         # SPEED OPTIMIZATION: Cache repeated calculations within same query
         cleaned_query = self._clean_text(query)
         
@@ -683,20 +785,46 @@ class BengaliFAQService:
         else:
             search_all_needed = True
         
-        # Search all collections if needed
+        # Search all collections if needed - ENHANCED to get more candidates for semantic analysis
         if search_all_needed or not all_candidates:
             if not all_candidates:
                 logger.info("No candidates from prime word routing, searching all collections")
             else:
                 logger.info("Expanding search to all collections for better matches")
             
-            all_collection_candidates = self._search_all_collections_with_embedding(query, query_embedding)
+            # ENHANCED: Get more candidates with higher n_results for better semantic matching
+            try:
+                collections = self.chroma_client.list_collections()
+                expanded_candidates = []
+                
+                for collection in collections:
+                    # Get more results per collection for semantic analysis
+                    if self.test_mode:
+                        coll_candidates = self._test_mode_search(collection, query, n_results=5)
+                    else:
+                        coll_candidates = self._search_collection_with_embedding(
+                            collection.name, query, query_embedding, n_results=5
+                        )
+                    expanded_candidates.extend(coll_candidates)
+                
+                # Merge with existing candidates, avoiding duplicates
+                existing_questions = {c['question'] for c in all_candidates}
+                for candidate in expanded_candidates:
+                    if candidate['question'] not in existing_questions:
+                        all_candidates.append(candidate)
+                        
+            except Exception as e:
+                logger.error(f"Error in expanded search: {e}")
+                # Fallback to original method
+                all_collection_candidates = self._search_all_collections_with_embedding(query, query_embedding)
+                existing_questions = {c['question'] for c in all_candidates}
+                for candidate in all_collection_candidates:
+                    if candidate['question'] not in existing_questions:
+                        all_candidates.append(candidate)
             
-            # Merge results, avoiding duplicates
-            existing_questions = {c['question'] for c in all_candidates}
-            for candidate in all_collection_candidates:
-                if candidate['question'] not in existing_questions:
-                    all_candidates.append(candidate)
+            # Sort and keep more candidates for semantic analysis
+            all_candidates.sort(key=lambda x: x['score'], reverse=True)
+            all_candidates = all_candidates[:15]  # Keep even more for better semantic matching
         
         # Apply hybrid matching to enhance similarity scores
         logger.info(f"Enhancing {len(all_candidates)} candidates with hybrid matching")
@@ -707,20 +835,192 @@ class BengaliFAQService:
             hybrid_matcher=self.hybrid_matcher
         )
         
+        # 🚀 CRITICAL: Pre-boost exact semantic matches before LLM reranking
+        all_candidates = self._boost_exact_semantic_matches(query, all_candidates)
+        
         # ULTRA-ADVANCED: Cross-collection disambiguation and authority scoring
         all_candidates = self._apply_cross_collection_disambiguation(
             all_candidates, query_lower, intent_context
         )
         
+        # 🚀 NEW: LLM Semantic Reranking for improved semantic understanding
+        logger.info(f"Applying LLM semantic reranking to {len(all_candidates)} candidates")
+        all_candidates = self._llm_semantic_rerank(query, all_candidates)
+        
         # Dynamic threshold calculation based on cross-collection ambiguity
         dynamic_threshold = self._calculate_dynamic_threshold(all_candidates, intent_context)
         logger.info(f"Using dynamic confidence threshold: {dynamic_threshold:.3f}")
         
-        # Check if best match meets dynamic confidence threshold
-        if all_candidates and all_candidates[0]['score'] >= dynamic_threshold:
+        # ENHANCED: More intelligent threshold for semantic matches
+        adjusted_threshold = dynamic_threshold
+        
+        # For semantic edge cases, be more lenient if we have good candidates
+        if all_candidates:
+            top_score = all_candidates[0]['score']
+            
+            # ENHANCED: Semantic equivalence detection for better matching
+            if top_score >= 0.30:  # Even lower threshold for semantic understanding
+                
+                # Find the best semantic match in all candidates, not just the top one
+                best_semantic_candidate = None
+                best_semantic_score = 0
+                
+                for candidate in all_candidates[:10]:  # Check top 10 candidates
+                    semantic_score = self._calculate_semantic_equivalence(query, candidate)
+                    if semantic_score > best_semantic_score:
+                        best_semantic_score = semantic_score
+                        best_semantic_candidate = candidate
+                
+                if best_semantic_candidate and best_semantic_score > 0.7:
+                    # Promote the semantically equivalent candidate to top
+                    if best_semantic_candidate != all_candidates[0]:
+                        all_candidates.remove(best_semantic_candidate)
+                        all_candidates.insert(0, best_semantic_candidate)
+                        logger.info(f"Promoted semantic match to top: {best_semantic_candidate['question'][:50]}...")
+                    
+                    adjusted_threshold = max(0.30, dynamic_threshold - 0.20)
+                    logger.info(f"Strong semantic equivalence detected (score: {best_semantic_score:.2f}), lowering threshold to {adjusted_threshold:.3f}")
+                else:
+                    adjusted_threshold = max(0.35, dynamic_threshold - 0.15)
+        
+        # Check if best match meets adjusted confidence threshold
+        if all_candidates and all_candidates[0]['score'] >= adjusted_threshold:
+            logger.info(f"Best match: {all_candidates[0]['question'][:50]}... (score: {all_candidates[0]['score']:.3f}, threshold: {adjusted_threshold:.3f})")
             return all_candidates[0], all_candidates
         
         return None, all_candidates
+    
+    def _boost_exact_semantic_matches(self, query: str, candidates: List[Dict]) -> List[Dict]:
+        """🚀 CRITICAL: Boost candidates that are exact semantic matches"""
+        query_lower = query.lower()
+        
+        # Define exact semantic equivalence patterns
+        exact_patterns = [
+            # Interest rate patterns - MOST CRITICAL
+            {
+                'query_pattern': r'(.+)(সুদের হার|সুদ হার)(.+)',
+                'candidate_pattern': r'(.+)(ইন্টারসেট রেট|ইন্টারেস্ট রেট)(.+)',
+                'boost': 0.7,  # Massive boost
+                'description': 'Interest rate equivalence'
+            },
+            # Card fee patterns
+            {
+                'query_pattern': r'(.+)(কার্ডের ফি|কার্ড ফি)(.+)',
+                'candidate_pattern': r'(.+)(কার্ড এর চার্জ|কার্ডের চার্জ)(.+)',
+                'boost': 0.6,
+                'description': 'Card fee equivalence'
+            },
+            # Account opening patterns
+            {
+                'query_pattern': r'(.+)(একাউন্ট খুলতে)(.+)',
+                'candidate_pattern': r'(.+)(একাউন্ট ওপেন|অ্যাকাউন্ট ওপেন)(.+)',
+                'boost': 0.5,
+                'description': 'Account opening equivalence'
+            }
+        ]
+        
+        import re
+        boosted_count = 0
+        
+        for candidate in candidates:
+            candidate_question = candidate['question'].lower()
+            original_score = candidate['score']
+            
+            for pattern in exact_patterns:
+                query_match = re.search(pattern['query_pattern'], query_lower)
+                candidate_match = re.search(pattern['candidate_pattern'], candidate_question)
+                
+                if query_match and candidate_match:
+                    # Check if the context around the patterns is similar
+                    query_context = (query_match.group(1) + query_match.group(3)).strip()
+                    candidate_context = (candidate_match.group(1) + candidate_match.group(3)).strip()
+                    
+                    # Simple context similarity check
+                    query_words = set(query_context.split())
+                    candidate_words = set(candidate_context.split())
+                    
+                    if query_words and candidate_words:
+                        context_overlap = len(query_words.intersection(candidate_words)) / len(query_words.union(candidate_words))
+                        
+                        # If context is reasonably similar, apply the boost
+                        if context_overlap >= 0.4:  # At least 40% context overlap
+                            boost_amount = pattern['boost'] * (0.5 + context_overlap * 0.5)  # Scale boost by context similarity
+                            candidate['score'] = min(1.0, original_score + boost_amount)
+                            candidate['semantic_boost'] = boost_amount
+                            candidate['semantic_reason'] = pattern['description']
+                            boosted_count += 1
+                            
+                            logger.info(f"🚀 Semantic boost applied: {pattern['description']} - "
+                                      f"Score {original_score:.3f} → {candidate['score']:.3f} "
+                                      f"(boost: +{boost_amount:.3f}, context: {context_overlap:.2f})")
+                            break  # Only apply one boost per candidate
+        
+        if boosted_count > 0:
+            # Re-sort candidates after boosting
+            candidates.sort(key=lambda x: x['score'], reverse=True)
+            logger.info(f"🚀 Applied semantic boosts to {boosted_count} candidates")
+        
+        return candidates
+    
+    def _calculate_semantic_equivalence(self, query: str, candidate: Dict) -> float:
+        """Calculate semantic equivalence score for specific Bengali banking terms"""
+        query_lower = query.lower()
+        question_lower = candidate['question'].lower()
+        
+        # Define semantic equivalences with confidence scores
+        equivalences = [
+            # Interest rate equivalences - ENHANCED
+            {
+                'query_terms': ['সুদের হার', 'সুদ হার', 'সুদ'],
+                'candidate_terms': ['ইন্টারেস্ট রেট', 'ইন্টারসেট রেট', 'ইন্টারেস্ট', 'ইন্টারসেট', 'রেট'],
+                'score': 0.95
+            },
+            # Branch/Online equivalences
+            {
+                'query_terms': ['শাখায় যেতে', 'শাখায়', 'ব্রাঞ্চে'],
+                'candidate_terms': ['অনলাইন', 'অনলাইনে', 'অনলাইন একাউন্ট'],
+                'score': 0.90
+            },
+            # Account opening variations
+            {
+                'query_terms': ['একাউন্ট খুলতে'],
+                'candidate_terms': ['একাউন্ট ওপেন', 'অ্যাকাউন্ট ওপেন', 'একাউন্ট খোলা'],
+                'score': 0.85
+            },
+            # Payroll context - ENHANCED
+            {
+                'query_terms': ['পেরোল অ্যাকাউন্টের', 'পেরোল একাউন্টের', 'পেরোল'],
+                'candidate_terms': ['পেরোল অ্যাকাউন্ট এর', 'পেরোল একাউন্ট এর', 'পেরোল', 'স্যালারি', 'বেতন'],
+                'score': 0.85
+            },
+            # Card/Fee equivalences
+            {
+                'query_terms': ['কার্ডের ফি', 'কার্ড ফি', 'ফি'],
+                'candidate_terms': ['কার্ড এর চার্জ', 'কার্ডের চার্জ', 'চার্জ'],
+                'score': 0.90
+            }
+        ]
+        
+        max_score = 0
+        
+        for equiv in equivalences:
+            query_match = any(term in query_lower for term in equiv['query_terms'])
+            candidate_match = any(term in question_lower for term in equiv['candidate_terms'])
+            
+            if query_match and candidate_match:
+                # Check for additional context overlap
+                context_bonus = 0
+                
+                # If both mention the same domain (payroll, account, etc.)
+                common_terms = ['পেরোল', 'একাউন্ট', 'অ্যাকাউন্ট']
+                for term in common_terms:
+                    if term in query_lower and term in question_lower:
+                        context_bonus += 0.1
+                
+                final_score = min(1.0, equiv['score'] + context_bonus)
+                max_score = max(max_score, final_score)
+        
+        return max_score
     
     def _detect_banking_intent(self, query: str) -> Dict:
         """Detect Islamic vs Conventional banking intent from query"""

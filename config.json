@@ -1,9 +1,10 @@
 {
   "models": {
-    "embedding_model": "text-embedding-3-large"
+    "embedding_model": "text-embedding-3-large",
+    "core_model": "gpt-4.1-nano"
   },
   "system": {
-    "confidence_threshold": 0.90,
+    "confidence_threshold": 0.50,
     "max_candidates": 1,
     "embedding_dimensions": 1024
   },
