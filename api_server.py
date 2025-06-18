@@ -285,7 +285,10 @@ def batch_query():
                 "timestamp": datetime.now().isoformat()
             },
             "results": results
-        }
+        }        
+        with open('response_log.json', 'a') as log_file:
+            json.dump(response, log_file)
+            log_file.write('\n')
         
         return unicode_jsonify(response)
         
