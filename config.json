@@ -1,26 +1,61 @@
 {
-  "models": {
-    "embedding_model": "text-embedding-3-large",
-    "core_model": "gpt-4.1-nano"
-  },
+  "embedding_model": "text-embedding-3-large",
+  "llm_model": "gpt-4o-mini",
   "system": {
-    "confidence_threshold": 0.50,
-    "max_candidates": 1,
-    "embedding_dimensions": 1024
+    "confidence_threshold": 0.90,
+    "max_candidates": 3,
+    "embedding_dimensions": 3072,
+    "max_batch_size": 100,
+    "cache_ttl_hours": 24,
+    "max_cache_size": 1000,
+    "rate_limit_requests_per_minute": 60,
+    "max_concurrent_requests": 10
   },
   "directories": {
     "faq_dir": "faq_data",
-    "cache_dir": "cache"
+    "cache_dir": "cache",
+    "logs_dir": "logs"
   },
   "logging": {
-    "level": "INFO"
+    "level": "INFO",
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "max_file_size_mb": 50,
+    "backup_count": 5,
+    "performance_logging": true
   },
-  "matcher_weights": {
+  "matching_weights": {
     "exact_match": 1.0,
     "cleaned_match": 0.95,
-    "ngram_match": 0.4,
-    "keyword_match": 0.7,
-    "embedding": 0.8,
-    "boost_factor": 0.15
+    "ngram_match": 0.5,
+    "keyword_match": 0.8,
+    "embedding": 0.85,
+    "phrase_match": 0.7,
+    "boost_factor": 0.2
+  },
+  "performance": {
+    "embedding_batch_size": 100,
+    "connection_pool_size": 5,
+    "request_timeout_seconds": 30,
+    "retry_attempts": 3,
+    "circuit_breaker_enabled": true,
+    "circuit_breaker_failure_threshold": 5,
+    "circuit_breaker_recovery_timeout": 60
+  },
+  "security": {
+    "enable_cors": true,
+    "allowed_origins": ["*"],
+    "max_request_size_mb": 16,
+    "enable_rate_limiting": true,
+    "security_headers": true
+  },
+  "monitoring": {
+    "enable_metrics": true,
+    "metrics_retention_days": 30,
+    "health_check_interval_seconds": 60,
+    "performance_alerts": {
+      "slow_query_threshold_seconds": 5.0,
+      "high_memory_threshold_mb": 1000,
+      "low_cache_hit_rate_threshold": 0.5
+    }
   }
 }

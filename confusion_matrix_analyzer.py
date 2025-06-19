@@ -202,12 +202,22 @@ class FAQConfusionMatrix:
             print(f"🔍 Test {i}/{len(test_cases)}: {semantic_type}")
             print(f"   Query: {query[:50]}...")
             
-            # Process query
-            result = faq_service.answer_query(query, debug=False)
-            
-            predicted_collection = result.get('collection', 'none') if result['found'] else 'none'
-            predicted_question = result.get('matched_question', '') if result['found'] else ''
-            confidence = result.get('confidence', 0.0)
+            # Process query with error handling
+            try:
+                result = faq_service.answer_query(query, debug=False)
+                
+                predicted_collection = result.get('collection', 'none') if result['found'] else 'none'
+                predicted_question = result.get('matched_question', '') if result['found'] else ''
+                confidence = result.get('confidence', 0.0)
+                found = result['found']
+                
+            except Exception as e:
+                print(f"   ❌ ERROR processing query: {e}")
+                predicted_collection = 'error'
+                predicted_question = ''
+                confidence = 0.0
+                found = False
+                result = {'found': False, 'confidence': 0.0}
             
             # Add to confusion matrix
             self.add_result(
@@ -217,12 +227,12 @@ class FAQConfusionMatrix:
                 expected_question=expected_question,
                 predicted_question=predicted_question,
                 confidence=confidence,
-                found=result['found'],
+                found=found,
                 semantic_type=semantic_type
             )
             
             # Show result
-            if result['found']:
+            if found:
                 correct = expected_collection == predicted_collection
                 status = "✅ CORRECT" if correct else "❌ WRONG COLLECTION"
                 print(f"   Result: {status} - {predicted_collection} ({confidence:.1%})")

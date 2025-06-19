@@ -415,7 +415,7 @@ The system uses `config.json` for all configuration settings. Edit this file to 
     "embedding_model": "text-embedding-3-large"
   },
   "system": {
-    "confidence_threshold": 0.90,
+    "confidence_threshold": 0.50,
     "max_candidates": 1,
     "embedding_dimensions": 1024
   },
@@ -438,7 +438,7 @@ The system uses `config.json` for all configuration settings. Edit this file to 
 ```
 
 **Key Settings:**
-- **confidence_threshold**: Minimum match score (0.9 = 90% confidence required)
+- **confidence_threshold**: Minimum match score (0.5 = 50% confidence required)
 - **embedding_model**: OpenAI model ("text-embedding-3-large" for best accuracy)
 - **embedding_dimensions**: Vector dimensions (1024 for balanced performance)
 - **matcher_weights**: Fine-tune hybrid matching algorithm components

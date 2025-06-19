@@ -1,101 +1,117 @@
 #!/usr/bin/env python3
 """
-FAQ Semantic Similarity Analysis and Confusion Matrix Generator
+FAQ Semantic Similarity Analysis Tool
 
-This script analyzes semantic similarity between different FAQ collections
-and generates confusion matrices to visualize cross-domain similarities.
+This script analyzes semantic relationships between FAQ collections,
+integrated with the main faq_service for consistency.
 """
 
 import os
-import json
+import sys
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
 from collections import defaultdict
-import re
+from typing import List, Dict, Tuple
+import logging
+
+# Import the faq_service to reuse existing functionality
+from faq_service import faq_service, FAQ_DIR
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
 
 class FAQSemanticAnalyzer:
-    def __init__(self, faq_data_dir='faq_data'):
-        self.faq_data_dir = faq_data_dir
-        self.collections = {}
+    def __init__(self):
         self.collection_names = []
-        self.similarity_matrix = None
+        self.questions_by_collection = defaultdict(list)
+        self.embeddings_by_collection = defaultdict(list)
         
-    def load_faq_collections(self):
-        """Load all FAQ collections from the data directory."""
-        for filename in sorted(os.listdir(self.faq_data_dir)):
-            if filename.endswith('.txt'):
-                collection_name = filename.replace('.txt', '').replace('_', ' ').title()
-                self.collection_names.append(collection_name)
+    def load_faq_collections_from_service(self):
+        """Load FAQ collections using the existing faq_service."""
+        try:
+            # Ensure FAQ service is initialized
+            if not faq_service.initialized:
+                logger.info("Initializing FAQ service...")
+                if not faq_service.initialize():
+                    raise RuntimeError("Failed to initialize FAQ service")
+            
+            # Get all collections from the service
+            stats = faq_service.get_system_stats()
+            collections = stats.get('collections', {})
+            
+            for collection_name, collection_info in collections.items():
+                # Extract meaningful collection name
+                display_name = collection_name.replace('faq_', '').replace('_', ' ').title()
+                self.collection_names.append(display_name)
                 
-                file_path = os.path.join(self.faq_data_dir, filename)
-                with open(file_path, 'r', encoding='utf-8') as f:
-                    content = f.read()
+                # Get questions from this collection
+                # Since we can't directly access the ChromaDB collections,
+                # we'll use the file parsing approach but with consistency
+                filename = collection_name.replace('faq_', '') + '.txt'
+                filepath = os.path.join(FAQ_DIR, filename)
                 
-                # Extract questions and answers
-                questions = []
-                answers = []
-                
-                # Split by lines and extract Q&A pairs
-                lines = content.split('\n')
-                current_question = ""
-                current_answer = ""
-                
-                for line in lines:
-                    line = line.strip()
-                    if line.startswith('Question:'):
-                        if current_question and current_answer:
-                            questions.append(current_question)
-                            answers.append(current_answer)
-                        current_question = line.replace('Question:', '').strip()
-                        current_answer = ""
-                    elif line.startswith('Answer:'):
-                        current_answer = line.replace('Answer:', '').strip()
-                    elif current_answer and line:
-                        current_answer += " " + line
-                
-                # Add the last Q&A pair
-                if current_question and current_answer:
-                    questions.append(current_question)
-                    answers.append(current_answer)
-                
-                # Combine questions and answers for comprehensive text analysis
-                full_text = ' '.join(questions + answers)
-                
-                self.collections[collection_name] = {
-                    'questions': questions,
-                    'answers': answers,
-                    'full_text': full_text,
-                    'filename': filename
-                }
-        
-        print(f"Loaded {len(self.collections)} FAQ collections:")
-        for name in self.collection_names:
-            q_count = len(self.collections[name]['questions'])
-            print(f"  - {name}: {q_count} Q&A pairs")
-    
+                if os.path.exists(filepath):
+                    faq_pairs = faq_service._preprocess_faq_file(filepath)
+                    questions = [pair['question'] for pair in faq_pairs]
+                    self.questions_by_collection[display_name] = questions
+                    
+                    # Generate embeddings using the service
+                    if questions and not faq_service.test_mode:
+                        embeddings = faq_service._create_embeddings(questions)
+                        self.embeddings_by_collection[display_name] = embeddings
+                        
+            logger.info(f"Loaded {len(self.collection_names)} collections")
+            
+        except Exception as e:
+            logger.error(f"Error loading collections: {e}")
+            raise
+
     def calculate_similarity_matrix(self):
-        """Calculate semantic similarity between collections using TF-IDF and cosine similarity."""
-        print("\nCalculating semantic similarities...")
+        """Calculate semantic similarity between collections using embeddings."""
+        logger.info("Calculating semantic similarities...")
         
-        # Prepare documents (full text from each collection)
-        documents = [self.collections[name]['full_text'] for name in self.collection_names]
+        if faq_service.test_mode:
+            logger.warning("Running in test mode - using dummy similarities")
+            # Create a dummy similarity matrix for test mode
+            n = len(self.collection_names)
+            self.similarity_matrix = np.eye(n) * 0.8 + np.random.rand(n, n) * 0.2
+            return self.similarity_matrix
         
-        # Create TF-IDF vectors
-        vectorizer = TfidfVectorizer(
-            max_features=1000,
-            stop_words=None,  # Keep Bengali words
-            ngram_range=(1, 2),
-            min_df=1,
-            max_df=0.95
-        )
-        
-        tfidf_matrix = vectorizer.fit_transform(documents)
+        # Calculate average embeddings for each collection
+        collection_embeddings = []
+        for name in self.collection_names:
+            embeddings = self.embeddings_by_collection.get(name, [])
+            if embeddings:
+                # Average all question embeddings to get collection embedding
+                avg_embedding = np.mean(embeddings, axis=0)
+                collection_embeddings.append(avg_embedding)
+            else:
+                # Fallback for empty collections
+                collection_embeddings.append(np.zeros(1024))  # EMBEDDING_DIMENSIONS
         
         # Calculate cosine similarity matrix
-        self.similarity_matrix = cosine_similarity(tfidf_matrix)
+        n = len(collection_embeddings)
+        self.similarity_matrix = np.zeros((n, n))
+        
+        for i in range(n):
+            for j in range(n):
+                if i == j:
+                    self.similarity_matrix[i][j] = 1.0
+                else:
+                    # Cosine similarity
+                    dot_product = np.dot(collection_embeddings[i], collection_embeddings[j])
+                    norm_i = np.linalg.norm(collection_embeddings[i])
+                    norm_j = np.linalg.norm(collection_embeddings[j])
+                    
+                    if norm_i > 0 and norm_j > 0:
+                        self.similarity_matrix[i][j] = dot_product / (norm_i * norm_j)
+                    else:
+                        self.similarity_matrix[i][j] = 0.0
         
         return self.similarity_matrix
     
@@ -129,19 +145,19 @@ class FAQSemanticAnalyzer:
         
         plt.tight_layout()
         plt.savefig(save_path, dpi=300, bbox_inches='tight')
-        print(f"Confusion matrix saved to: {save_path}")
+        logger.info(f"Confusion matrix saved to: {save_path}")
         
         return save_path
     
     def generate_detailed_report(self, save_path='faq_confusion_report.json'):
         """Generate detailed similarity analysis report."""
-        print("\nGenerating detailed similarity report...")
+        logger.info("Generating detailed similarity report...")
         
         report = {
             'metadata': {
                 'total_collections': len(self.collection_names),
                 'collection_names': self.collection_names,
-                'analysis_method': 'TF-IDF + Cosine Similarity'
+                'analysis_method': 'OpenAI Embeddings + Cosine Similarity' if not faq_service.test_mode else 'Test Mode (Dummy Data)'
             },
             'collection_details': {},
             'similarity_analysis': {
@@ -154,13 +170,10 @@ class FAQSemanticAnalyzer:
         
         # Collection details
         for name in self.collection_names:
-            collection = self.collections[name]
+            questions = self.questions_by_collection.get(name, [])
             report['collection_details'][name] = {
-                'filename': collection['filename'],
-                'question_count': len(collection['questions']),
-                'avg_question_length': np.mean([len(q.split()) for q in collection['questions']]) if collection['questions'] else 0,
-                'avg_answer_length': np.mean([len(a.split()) for a in collection['answers']]) if collection['answers'] else 0,
-                'total_words': len(collection['full_text'].split())
+                'question_count': len(questions),
+                'avg_question_length': np.mean([len(q.split()) for q in questions]) if questions else 0
             }
         
         # Similarity analysis
@@ -173,7 +186,7 @@ class FAQSemanticAnalyzer:
                     'collection_2': self.collection_names[j],
                     'similarity_score': float(similarity)
                 })
-        
+                
         # Sort by similarity
         similarities.sort(key=lambda x: x['similarity_score'], reverse=True)
         
@@ -191,47 +204,13 @@ class FAQSemanticAnalyzer:
                 'min_similarity': float(np.min(other_similarities))
             }
         
-        # Cross-domain insights
-        banking_related = [name for name in self.collection_names if any(word in name.lower() for word in ['banking', 'agent', 'sme', 'nrb', 'privilege'])]
-        product_related = [name for name in self.collection_names if any(word in name.lower() for word in ['card', 'retails', 'payroll'])]
-        islamic_related = [name for name in self.collection_names if 'yaqeen' in name.lower()]
-        
-        report['similarity_analysis']['cross_domain_insights'] = {
-            'banking_services': banking_related,
-            'product_services': product_related, 
-            'islamic_services': islamic_related,
-            'domain_separation_quality': self._analyze_domain_separation()
-        }
-        
         # Save report
+        import json
         with open(save_path, 'w', encoding='utf-8') as f:
             json.dump(report, f, indent=2, ensure_ascii=False)
         
-        print(f"Detailed report saved to: {save_path}")
+        logger.info(f"Detailed report saved to: {save_path}")
         return report
-    
-    def _analyze_domain_separation(self):
-        """Analyze how well different domains are separated."""
-        insights = {}
-        
-        # Check Islamic vs Conventional banking separation
-        yaqeen_idx = None
-        conventional_banking_indices = []
-        
-        for i, name in enumerate(self.collection_names):
-            if 'yaqeen' in name.lower():
-                yaqeen_idx = i
-            elif any(word in name.lower() for word in ['banking', 'agent', 'sme', 'nrb']):
-                conventional_banking_indices.append(i)
-        
-        if yaqeen_idx is not None and conventional_banking_indices:
-            yaqeen_conventional_similarities = [self.similarity_matrix[yaqeen_idx][idx] for idx in conventional_banking_indices]
-            insights['islamic_conventional_separation'] = {
-                'avg_similarity': float(np.mean(yaqeen_conventional_similarities)),
-                'separation_quality': 'Good' if np.mean(yaqeen_conventional_similarities) < 0.5 else 'Moderate' if np.mean(yaqeen_conventional_similarities) < 0.7 else 'Poor'
-            }
-        
-        return insights
     
     def print_summary(self):
         """Print a summary of the analysis."""
@@ -242,34 +221,37 @@ class FAQSemanticAnalyzer:
         print(f"Total Collections Analyzed: {len(self.collection_names)}")
         print(f"Collections: {', '.join(self.collection_names)}")
         
-        # Find most and least similar pairs
-        max_similarity = 0
-        min_similarity = 1
-        max_pair = None
-        min_pair = None
-        
-        for i in range(len(self.collection_names)):
-            for j in range(i+1, len(self.collection_names)):
-                similarity = self.similarity_matrix[i][j]
-                if similarity > max_similarity:
-                    max_similarity = similarity
-                    max_pair = (self.collection_names[i], self.collection_names[j])
-                if similarity < min_similarity:
-                    min_similarity = similarity
-                    min_pair = (self.collection_names[i], self.collection_names[j])
-        
-        print(f"\nMost Similar Collections:")
-        print(f"  {max_pair[0]} ↔ {max_pair[1]} (Similarity: {max_similarity:.3f})")
-        
-        print(f"\nLeast Similar Collections:")
-        print(f"  {min_pair[0]} ↔ {min_pair[1]} (Similarity: {min_similarity:.3f})")
-        
-        # Overall statistics
-        upper_triangle = self.similarity_matrix[np.triu_indices_from(self.similarity_matrix, k=1)]
-        print(f"\nOverall Similarity Statistics:")
-        print(f"  Average Similarity: {np.mean(upper_triangle):.3f}")
-        print(f"  Standard Deviation: {np.std(upper_triangle):.3f}")
-        print(f"  Range: {np.min(upper_triangle):.3f} - {np.max(upper_triangle):.3f}")
+        if hasattr(self, 'similarity_matrix'):
+            # Find most and least similar pairs
+            max_similarity = 0
+            min_similarity = 1
+            max_pair = None
+            min_pair = None
+            
+            for i in range(len(self.collection_names)):
+                for j in range(i+1, len(self.collection_names)):
+                    similarity = self.similarity_matrix[i][j]
+                    if similarity > max_similarity:
+                        max_similarity = similarity
+                        max_pair = (self.collection_names[i], self.collection_names[j])
+                    if similarity < min_similarity:
+                        min_similarity = similarity
+                        min_pair = (self.collection_names[i], self.collection_names[j])
+            
+            print(f"\nMost Similar Collections:")
+            if max_pair:
+                print(f"  {max_pair[0]} ↔ {max_pair[1]} (Similarity: {max_similarity:.3f})")
+            
+            print(f"\nLeast Similar Collections:")
+            if min_pair:
+                print(f"  {min_pair[0]} ↔ {min_pair[1]} (Similarity: {min_similarity:.3f})")
+            
+            # Overall statistics
+            upper_triangle = self.similarity_matrix[np.triu_indices_from(self.similarity_matrix, k=1)]
+            print(f"\nOverall Similarity Statistics:")
+            print(f"  Average Similarity: {np.mean(upper_triangle):.3f}")
+            print(f"  Standard Deviation: {np.std(upper_triangle):.3f}")
+            print(f"  Range: {np.min(upper_triangle):.3f} - {np.max(upper_triangle):.3f}")
 
 def main():
     """Main execution function."""
@@ -279,7 +261,7 @@ def main():
     analyzer = FAQSemanticAnalyzer()
     
     # Load FAQ collections
-    analyzer.load_faq_collections()
+    analyzer.load_faq_collections_from_service()
     
     # Calculate similarity matrix
     analyzer.calculate_similarity_matrix()

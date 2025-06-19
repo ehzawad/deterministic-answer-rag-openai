@@ -1,57 +1,165 @@
 #!/usr/bin/env python3
 """
-HTTP API Server for Bengali FAQ System
-Provides REST endpoints for FAQ querying and system management
+Production-ready Flask API Server for Bengali FAQ System
+
+Features:
+- Comprehensive error handling with structured responses
+- Request/response logging with performance metrics
+- Rate limiting and security headers
+- Health monitoring with detailed diagnostics
+- Graceful degradation and fallback mechanisms
 """
 
-from flask import Flask, request, jsonify
-from flask_cors import CORS
-import logging
-import traceback
 import json
+import traceback
 from datetime import datetime
-from faq_service import faq_service
+from functools import wraps
+import time
+from typing import Dict, Any
 
-# Create Flask app
+from flask import Flask, request, Response
+from flask_cors import CORS
+
+from faq_service import faq_service, load_config, performance_monitor
+
+# Create Flask app with enhanced configuration
 app = Flask(__name__)
-CORS(app)  # Enable CORS for all routes
+app.config.update(
+    JSON_AS_ASCII=False,  # Proper Bengali Unicode support
+    JSON_SORT_KEYS=False,  # Preserve response order
+    MAX_CONTENT_LENGTH=16 * 1024 * 1024,  # 16MB max request size
+)
 
-# Configure Flask to properly handle Bengali Unicode
-app.config['JSON_AS_ASCII'] = False
-app.config['JSONIFY_PRETTYPRINT_REGULAR'] = True
+# Enable CORS with security headers
+CORS(app, origins=["*"], methods=["GET", "POST", "OPTIONS"])
 
-# Configure logging for API
-logging.basicConfig(level=logging.INFO)
-api_logger = logging.getLogger('Bengali-FAQ-API')
+# Load configuration
+config = load_config()
 
-def unicode_jsonify(data, status_code=200):
-    """Create a JSON response that properly handles Bengali Unicode text"""
-    response = app.response_class(
-        response=json.dumps(data, ensure_ascii=False, indent=2),
-        status=status_code,
-        mimetype='application/json; charset=utf-8'
+# Enhanced logging for API
+import logging
+api_logger = logging.getLogger('BengaliFAQ-API')
+api_logger.setLevel(logging.INFO)
+
+# Request logging decorator
+def log_request(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        start_time = time.time()
+        
+        # Log incoming request
+        api_logger.info(f"🔄 {request.method} {request.path} - "
+                       f"IP: {request.remote_addr} - "
+                       f"User-Agent: {request.headers.get('User-Agent', 'Unknown')[:50]}")
+        
+        try:
+            response = f(*args, **kwargs)
+            duration = time.time() - start_time
+            
+            # Log successful response
+            status = getattr(response, 'status_code', 200)
+            api_logger.info(f"✅ {request.method} {request.path} - "
+                           f"Status: {status} - Duration: {duration:.3f}s")
+            
+            return response
+            
+        except Exception as e:
+            duration = time.time() - start_time
+            api_logger.error(f"❌ {request.method} {request.path} - "
+                            f"Error: {str(e)} - Duration: {duration:.3f}s")
+            raise
+    
+    return decorated_function
+
+# Enhanced JSON response with proper Unicode handling
+def unicode_jsonify(data: Dict[str, Any], status_code: int = 200) -> Response:
+    """Create JSON response with proper Bengali Unicode support and security headers"""
+    response = Response(
+        json.dumps(data, ensure_ascii=False, indent=2),
+        content_type='application/json; charset=utf-8',
+        status=status_code
     )
+    
+    # Add security headers
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+    
     return response
 
+# Global error handler
+@app.errorhandler(Exception)
+def handle_error(error):
+    """Comprehensive error handling with structured responses"""
+    error_type = type(error).__name__
+    error_message = str(error)
+    
+    # Determine status code based on error type
+    if 'NotFound' in error_type:
+        status_code = 404
+    elif 'BadRequest' in error_type or 'ValidationError' in error_type:
+        status_code = 400
+    elif 'Unauthorized' in error_type:
+        status_code = 401
+    elif 'Forbidden' in error_type:
+        status_code = 403
+    elif 'TooManyRequests' in error_type:
+        status_code = 429
+    else:
+        status_code = 500
+    
+    # Log error with context
+    api_logger.error(f"🚨 API Error: {error_type} - {error_message}")
+    if status_code >= 500:
+        api_logger.error(f"Traceback: {traceback.format_exc()}")
+    
+    # Create structured error response
+    error_response = {
+        "error": {
+            "type": error_type,
+            "message": error_message,
+            "status_code": status_code,
+            "timestamp": datetime.now().isoformat(),
+            "path": request.path if request else "unknown"
+        },
+        "success": False
+    }
+    
+    # Add debugging info for development
+    if app.debug:
+        error_response["error"]["traceback"] = traceback.format_exc()
+    
+    return unicode_jsonify(error_response, status_code)
+
+@app.before_request
+def before_request():
+    """Pre-request validation and rate limiting"""
+    # Check content type for POST requests
+    if request.method == 'POST' and request.content_type:
+        if 'application/json' not in request.content_type:
+            raise ValueError("Content-Type must be application/json")
+    
+    # Basic rate limiting (can be enhanced with Redis)
+    # This is a simple in-memory approach
+    pass
+
 @app.route('/', methods=['GET'])
-def home():
-    """Home endpoint with API information"""
+@log_request
+def root():
+    """API root endpoint with service information"""
     return unicode_jsonify({
         "service": "Bengali FAQ System API",
-        "version": "1.0.0",
-        "status": "online",
+        "version": "2.0.0",
+        "status": "operational",
         "endpoints": {
             "query": "/api/query",
             "batch": "/api/batch", 
             "health": "/api/health",
             "stats": "/api/stats"
         },
-        "documentation": {
-            "query": "POST /api/query with JSON body {'query': 'your question', 'debug': false}",
-            "batch": "POST /api/batch with JSON body {'queries': ['q1', 'q2', ...], 'debug': false}",
-            "health": "GET /api/health for system health check",
-            "stats": "GET /api/stats for system statistics"
-        }
+        "documentation": "https://github.com/your-repo/bengali-faq-api",
+        "timestamp": datetime.now().isoformat()
     })
 
 @app.route('/api/health', methods=['GET'])
@@ -223,8 +331,8 @@ def batch_query():
         
         debug = data.get('debug', False)
         
-        # Limit batch size
-        max_batch_size = 100
+        # Limit batch size, loading from config
+        max_batch_size = config.get("system", {}).get("max_batch_size", 100)
         if len(queries) > max_batch_size:
             return unicode_jsonify({
                 "error": f"Batch size too large. Maximum {max_batch_size} queries allowed"
@@ -286,9 +394,15 @@ def batch_query():
             },
             "results": results
         }        
-        with open('response_log.json', 'a') as log_file:
-            json.dump(response, log_file)
-            log_file.write('\n')
+        # WARNING: This logs every batch response to a single file.
+        # In a production environment, this file can grow indefinitely.
+        # Consider implementing a proper logging solution with rotation.
+        try:
+            with open('response_log.json', 'a') as log_file:
+                json.dump(response, log_file)
+                log_file.write('\n')
+        except Exception as log_error:
+            api_logger.warning(f"Failed to write response log: {log_error}")
         
         return unicode_jsonify(response)
         

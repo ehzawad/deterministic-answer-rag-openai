@@ -13,9 +13,9 @@ semantics, providing reasonable scores for contextually similar questions.
 
 import re
 import logging
+import numpy as np
 from typing import List, Dict, Tuple, Set, Optional, Any
 from collections import Counter
-import numpy as np
 
 # Configure logging
 logger = logging.getLogger('BengaliFAQ-HybridMatcher')
@@ -207,6 +207,82 @@ class HybridMatcher:
             }
         }
             
+        # Enhanced banking-specific semantic equivalences for Bengali
+        self.semantic_groups = {
+            # Interest rate variations
+            'interest_rate': {
+                'terms': ['সুদের হার', 'ইন্টারেস্ট রেট', 'ইন্টারসেট রেট', 'সুদ', 'মুনাফা', 'লাভ'],
+                'boost': 0.6,
+                'context_terms': ['কত', 'কি', 'পরিমাণ', 'শতাংশ', '%']
+            },
+            # Eligibility variations
+            'eligibility': {
+                'terms': ['যোগ্য', 'যোগ্যতা', 'এলিজিবিলিটি', 'এলিজিবেল', 'উপযুক্ত', 'শর্ত'],
+                'boost': 0.5,
+                'context_terms': ['কে', 'কারা', 'কি', 'খোলার জন্য', 'খুলতে']
+            },
+            # Benefits/advantages variations
+            'benefits': {
+                'terms': ['সুবিধা', 'সুবিধাসমূহ', 'বেনিফিট', 'লাভ', 'ফায়দা', 'সুযোগ'],
+                'boost': 0.5,
+                'context_terms': ['কি', 'কী', 'কোন', 'আছে']
+            },
+            # Account opening variations
+            'account_open': {
+                'terms': ['খোলা', 'খুলা', 'ওপেন', 'খুলতে', 'খোলার', 'চালু'],
+                'boost': 0.4,
+                'context_terms': ['অ্যাকাউন্ট', 'একাউন্ট', 'হিসাব']
+            },
+            # Online/digital variations
+            'online': {
+                'terms': ['অনলাইন', 'অনলাইনে', 'ডিজিটাল', 'ইন্টারনেট', 'ওয়েব'],
+                'boost': 0.4,
+                'context_terms': ['সম্ভব', 'যায়', 'পারি']
+            },
+            # Charges/fees variations
+            'charges': {
+                'terms': ['চার্জ', 'ফি', 'খরচ', 'ব্যয়', 'মূল্য', 'দাম'],
+                'boost': 0.5,
+                'context_terms': ['কত', 'আছে', 'লাগে', 'প্রযোজ্য']
+            },
+            # Premium/special account variations
+            'premium': {
+                'terms': ['প্রিমিয়াম', 'প্রিমিয়ার', 'বিশেষ', 'স্পেশাল'],
+                'boost': 0.4,
+                'context_terms': ['অ্যাকাউন্ট', 'একাউন্ট', 'সম্পর্কে']
+            },
+            # Saver/savings variations
+            'saver': {
+                'terms': ['সেভার', 'সাভির্স', 'সেভিংস', 'সঞ্চয়', 'ই-সেভার', 'ইসেভার'],
+                'boost': 0.6,
+                'context_terms': ['পেরোল', 'কি', 'সম্পর্কে']
+            },
+            # Documents variations
+            'documents': {
+                'terms': ['ডকুমেন্ট', 'কাগজপত্র', 'নথি', 'প্রমাণপত্র', 'সার্টিফিকেট'],
+                'boost': 0.5,
+                'context_terms': ['লাগবে', 'প্রয়োজন', 'দরকার', 'জমা']
+            },
+            # Account types variations
+            'account_types': {
+                'terms': ['ধরন', 'প্রকার', 'টাইপ', 'ক্যাটাগরি', 'শ্রেণী', 'অপশন'],
+                'boost': 0.5,
+                'context_terms': ['কত', 'কয়', 'অ্যাকাউন্ট', 'একাউন্ট']
+            },
+            # Employee/payroll variations
+            'employee': {
+                'terms': ['কর্মচারী', 'এমপ্লয়ি', 'এমপ্লয়ির', 'চাকরিজীবী', 'কর্মী'],
+                'boost': 0.4,
+                'context_terms': ['পেরোল', 'হিসাবে', 'হিসেবে']
+            },
+            # Process/procedure variations
+            'process': {
+                'terms': ['প্রক্রিয়া', 'পদ্ধতি', 'উপায়', 'কীভাবে', 'কিভাবে'],
+                'boost': 0.4,
+                'context_terms': ['কি', 'কী', 'করতে', 'হয়']
+            }
+        }
+        
         logger.info(f"Initialized HybridMatcher with weights: {self.weights}")
         logger.info(f"Loaded {len(self.banking_phrases)} banking phrases for matching")
     
@@ -521,15 +597,18 @@ class HybridMatcher:
             ngrams2 = set(get_ngrams(t2, n))
             
             if not ngrams1 or not ngrams2:
-                similarities.append(0.0)
+                similarities.append((0.0, importance_weights.get(n, 0.5)))
                 continue
                 
             # Calculate weighted Jaccard similarity
-            intersection = len(ngrams1.intersection(ngrams2))
-            union = len(ngrams1.union(ngrams2))
+            intersection_size = len(ngrams1.intersection(ngrams2))
+            union_size = len(ngrams1.union(ngrams2))
             
-            # Calculate similarity
-            sim = intersection / union if union > 0 else 0.0
+            # Calculate similarity with division by zero protection
+            if union_size > 0:
+                sim = intersection_size / union_size
+            else:
+                sim = 0.0
             
             # Add sequence matching bonus
             # Check if there are any consecutive matching n-grams
@@ -541,11 +620,11 @@ class HybridMatcher:
                     consecutive_matches += 1
             
             seq_bonus = min(0.2, consecutive_matches * 0.05)  # Cap the bonus
-            sim = min(1.0, sim + seq_bonus)  # Apply bonus but cap at 1.0
+            total_similarity = min(1.0, sim + seq_bonus)  # Apply bonus but cap at 1.0
             
             # Store with weight
             weight = importance_weights.get(n, 0.5)
-            similarities.append((sim, weight))
+            similarities.append((total_similarity, weight))
             
         # Combine similarities with weights
         if similarities:
@@ -756,6 +835,42 @@ class HybridMatcher:
                         
         return min(0.5, expansion_boost)  # Cap the expansion boost
 
+    def _apply_semantic_boost(self, query: str, question: str, base_score: float, 
+                            context_score: float = 0.0) -> Tuple[float, bool, str]:
+        """
+        Apply semantic understanding boost for specific banking concepts.
+        Now uses enhanced semantic groups with more Bengali variations.
+        
+        :param query: The user's query
+        :param question: The FAQ question
+        :param base_score: The current similarity score
+        :param context_score: Embedding similarity score for context
+        :return: Tuple of (boosted_score, was_boosted, boost_reason)
+        """
+        query_lower = query.lower()
+        question_lower = question.lower()
+        
+        for group_name, group_data in self.semantic_groups.items():
+            # Check if query contains any term from this semantic group
+            query_has_term = any(term in query_lower for term in group_data['terms'])
+            question_has_term = any(term in question_lower for term in group_data['terms'])
+            
+            if query_has_term and question_has_term:
+                # Check for context terms
+                context_match = any(ctx in query_lower for ctx in group_data.get('context_terms', []))
+                
+                if context_match or context_score > 0.3:
+                    boost = group_data['boost']
+                    boosted_score = min(1.0, base_score + boost)
+                    
+                    logger.info(f"🚀 Semantic boost applied: {group_name} - "
+                              f"Score {base_score:.3f} → {boosted_score:.3f} "
+                              f"(boost: +{boost:.3f}, context: {context_score:.2f})")
+                    
+                    return boosted_score, True, f"{group_name}_equivalence"
+        
+        return base_score, False, ""
+
 
 class IntentConfusionMatrix:
     """
@@ -825,6 +940,15 @@ def hybrid_enhance_candidates(candidates: List[Dict],
         candidate["original_embedding_score"] = embedding_score
         candidate["score"] = hybrid_result["final_score"]
         candidate["match_details"] = hybrid_result
+        
+        # Apply semantic boost if applicable
+        boosted_score, was_boosted, boost_reason = hybrid_matcher._apply_semantic_boost(
+            query, faq_question, candidate["score"], embedding_score
+        )
+        
+        if was_boosted:
+            candidate["score"] = boosted_score
+            candidate["semantic_boost"] = boost_reason
         
     # Resort based on new scores
     candidates.sort(key=lambda x: x['score'], reverse=True)

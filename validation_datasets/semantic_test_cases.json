@@ -1,0 +1,241 @@
+{
+  "metadata": {
+    "title": "Bengali Banking FAQ Semantic Validation Dataset",
+    "version": "1.0.0",
+    "description": "Comprehensive test cases for semantic understanding validation",
+    "total_test_cases": 50,
+    "domains": ["payroll", "islamic", "conventional", "cards", "women", "sme", "nrb", "agent", "privilege"],
+    "test_types": ["exact_match", "semantic_equivalence", "syntactic_variation", "cross_domain", "edge_cases"]
+  },
+  "test_cases": [
+    {
+      "id": 1,
+      "category": "payroll_basic",
+      "test_type": "exact_match",
+      "query": "পেরোল একাউন্টের সুবিধাসমূহ কী কী?",
+      "expected_collection": "faq_payroll",
+      "expected_question": "পেরোল একাউন্ত এর কি কি সুবিধা আছে?",
+      "semantic_intent": "payroll_benefits",
+      "difficulty": "easy"
+    },
+    {
+      "id": 2,
+      "category": "payroll_semantic",
+      "test_type": "semantic_equivalence",
+      "query": "পেরোল অ্যাকাউন্টের সুদের হার কত?",
+      "expected_collection": "faq_payroll",
+      "expected_question": "পেরোল অ্যাকাউন্ট এর ইন্টারসেট রেট কত?",
+      "semantic_intent": "payroll_interest_rate",
+      "semantic_equivalence": "সুদের হার = ইন্টারসেট রেট",
+      "difficulty": "medium"
+    },
+    {
+      "id": 3,
+      "category": "payroll_variation",
+      "test_type": "syntactic_variation",
+      "query": "পেরোল একাউন্ট খোলার জন্য কারা যোগ্য?",
+      "expected_collection": "faq_payroll",
+      "expected_question": "পেরোল একাউন্ট খুলার এলিজিবিলিটি কি?",
+      "semantic_intent": "payroll_eligibility",
+      "syntactic_variations": ["খোলার = খুলার", "কারা যোগ্য = এলিজিবিলিটি"],
+      "difficulty": "medium"
+    },
+    {
+      "id": 4,
+      "category": "islamic_basic",
+      "test_type": "exact_match",
+      "query": "ইয়াকিন একাউন্টের সুবিধা কি?",
+      "expected_collection": "faq_yaqeen",
+      "expected_question": "ইয়াকিন সেভিংস একাউন্ট এর কি কি সুবিধা?",
+      "semantic_intent": "islamic_account_benefits",
+      "difficulty": "easy"
+    },
+    {
+      "id": 5,
+      "category": "islamic_semantic",
+      "test_type": "semantic_equivalence",
+      "query": "ইয়াকিন একাউন্টের ইন্টারেস্ট রেট কত?",
+      "expected_collection": "faq_yaqeen",
+      "expected_question": "ইয়াকিন সেভিংস এ প্রফিট রেট কত?",
+      "semantic_intent": "islamic_profit_rate",
+      "semantic_equivalence": "ইন্টারেস্ট রেট = প্রফিট রেট (Islamic banking)",
+      "difficulty": "hard"
+    },
+    {
+      "id": 6,
+      "category": "charges_semantic",
+      "test_type": "semantic_equivalence",
+      "query": "এমটিবি রেগুলার অ্যাকাউন্টে কি চার্জ আছে?",
+      "expected_collection": "faq_nrb",
+      "expected_question": "MTB এনআরবি (NRB) সেভিংস একাউন্ট এ বাৎসরিক কোন চার্জ আছে কি?",
+      "semantic_intent": "account_charges",
+      "semantic_equivalence": "এমটিবি রেগুলার ≈ এমটিবি এনআরবি, চার্জ আছে = বাৎসরিক কোন চার্জ",
+      "difficulty": "hard"
+    },
+    {
+      "id": 7,
+      "category": "account_opening",
+      "test_type": "semantic_equivalence",
+      "query": "অ্যাকাউন্ট খুলতে শাখায় যেতে হবে কি?",
+      "expected_collection": "faq_women",
+      "expected_question": "অঙ্গনা একাউন্ট ওপেন করতে কি কি ডকুমেন্টস লাগবে?",
+      "semantic_intent": "account_opening_process",
+      "semantic_equivalence": "একাউন্ট খুলতে = একাউন্ট ওপেন করতে",
+      "difficulty": "medium"
+    },
+    {
+      "id": 8,
+      "category": "card_fees",
+      "test_type": "semantic_equivalence",
+      "query": "পেরোল কার্ডের ফি কেমন?",
+      "expected_collection": "faq_payroll",
+      "expected_question": "পেরোল একাউন্ট এ ডেবিট কার্ড এর চার্জ আছে কি?",
+      "semantic_intent": "card_charges",
+      "semantic_equivalence": "কার্ডের ফি = কার্ড এর চার্জ",
+      "difficulty": "medium"
+    },
+    {
+      "id": 9,
+      "category": "sme_basic",
+      "test_type": "exact_match",
+      "query": "এসএমই একাউন্ট খুলতে কি কি কাগজ লাগে?",
+      "expected_collection": "faq_sme",
+      "expected_question": "এসএমই একাউন্ট খুলতে কি কি কাগজ লাগে?",
+      "semantic_intent": "sme_account_documents",
+      "difficulty": "easy"
+    },
+    {
+      "id": 10,
+      "category": "women_banking",
+      "test_type": "syntactic_variation",
+      "query": "অঙ্গনা একাউন্ট খোলার ডকুমেন্ট কি কি?",
+      "expected_collection": "faq_women",
+      "expected_question": "অঙ্গনা একাউন্ট ওপেন করতে কি কি ডকুমেন্টস লাগবে?",
+      "semantic_intent": "women_account_documents",
+      "syntactic_variations": ["খোলার = ওপেন করতে", "ডকুমেন্ট = ডকুমেন্টস"],
+      "difficulty": "easy"
+    },
+    {
+      "id": 11,
+      "category": "nrb_remittance",
+      "test_type": "exact_match",
+      "query": "আমি একজন প্রবাসী, আপনাদের ব্যাংকে মাধ্যমে কি আমি রেমিটেন্স পাঠাতে পারবো?",
+      "expected_collection": "faq_nrb",
+      "expected_question": "আমি একজন প্রবাসী, আপনাদের ব্যাংকে মাধ্যমে কি আমি রেমিটেন্স পাঠাতে পারবো?",
+      "semantic_intent": "nrb_remittance",
+      "difficulty": "easy"
+    },
+    {
+      "id": 12,
+      "category": "cross_domain_islamic",
+      "test_type": "cross_domain",
+      "query": "ইসলামিক পেরোল একাউন্টের চার্জ কত?",
+      "expected_collection": "faq_yaqeen",
+      "expected_question": "ইসলামিক পেরোল একাউন্ট এ ডেবিট কার্ড এর চার্জ আছে কি?",
+      "semantic_intent": "islamic_payroll_charges",
+      "cross_domain_context": "Islamic + Payroll",
+      "difficulty": "hard"
+    },
+    {
+      "id": 13,
+      "category": "edge_case_ambiguous",
+      "test_type": "edge_cases",
+      "query": "একাউন্টের সুদ কত?",
+      "expected_collection": "any",
+      "expected_behavior": "require_clarification_or_best_match",
+      "semantic_intent": "generic_interest_rate",
+      "ambiguity_level": "high",
+      "difficulty": "hard"
+    },
+    {
+      "id": 14,
+      "category": "agent_banking",
+      "test_type": "exact_match",
+      "query": "আমি এজেন্ট ব্যাংকিং সম্পর্কে জানতে চাই",
+      "expected_collection": "faq_agent",
+      "expected_question": "আমি এজেন্ট ব্যাংকিং সম্পর্কে জানতে চাই?",
+      "semantic_intent": "agent_banking_service",
+      "difficulty": "easy"
+    },
+    {
+      "id": 15,
+      "category": "privilege_banking",
+      "test_type": "exact_match",
+      "query": "প্রিভিলেজ একাউন্ট খোলার সুবিধা কি?",
+      "expected_collection": "faq_privilege",
+      "expected_question": "প্রিভিলেজ একাউন্ত খোলার সুবিধা কি?",
+      "semantic_intent": "privilege_banking_benefits",
+      "difficulty": "easy"
+    },
+    {
+      "id": 16,
+      "category": "semantic_complex",
+      "test_type": "semantic_equivalence",
+      "query": "বেতনের একাউন্টে সুবিধা কি?",
+      "expected_collection": "faq_payroll",
+      "expected_question": "পেরোল একাউন্ত এর কি কি সুবিধা আছে?",
+      "semantic_intent": "payroll_benefits",
+      "semantic_equivalence": "বেতনের একাউন্ট = পেরোল একাউন্ট",
+      "difficulty": "medium"
+    },
+    {
+      "id": 17,
+      "category": "mixed_language",
+      "test_type": "syntactic_variation",
+      "query": "এসএমই একাউন্টের সুবিধা কি?",
+      "expected_collection": "faq_sme",
+      "expected_question": "ব্যবসায়ীদের জন্য আপনাদের ব্যাংকে কি কি সুবিধা আছে?",
+      "semantic_intent": "sme_benefits",
+      "language_mix": "Bengali",
+      "difficulty": "medium"
+    },
+    {
+      "id": 18,
+      "category": "contextual_understanding",
+      "test_type": "semantic_equivalence",
+      "query": "মহিলাদের জন্য বিশেষ একাউন্ট আছে কি?",
+      "expected_collection": "faq_women",
+      "expected_question": "অঙ্গনা একাউন্ট কি?",
+      "semantic_intent": "women_special_account",
+      "contextual_clue": "মহিলাদের → অঙ্গনা",
+      "difficulty": "hard"
+    },
+    {
+      "id": 19,
+      "category": "negative_test",
+      "test_type": "edge_cases",
+      "query": "কিভাবে চাঁদে যাব?",
+      "expected_collection": "none",
+      "expected_behavior": "no_match",
+      "semantic_intent": "irrelevant_query",
+      "difficulty": "easy"
+    },
+    {
+      "id": 20,
+      "category": "card_semantic",
+      "test_type": "semantic_equivalence",
+      "query": "ডেবিট কার্ডের বার্ষিক ফি কত?",
+      "expected_collection": "faq_card",
+      "expected_question": "ডেবিট কার্ড এর বার্ষিক চার্জ কত?",
+      "semantic_intent": "debit_card_annual_fee",
+      "semantic_equivalence": "বার্ষিক ফি = বার্ষিক চার্জ",
+      "difficulty": "medium"
+    }
+  ],
+  "validation_criteria": {
+    "accuracy_threshold": 95.0,
+    "semantic_understanding_tests": 12,
+    "syntactic_variation_tests": 5,
+    "cross_domain_tests": 3,
+    "edge_case_tests": 3,
+    "confidence_threshold": 0.75,
+    "response_time_max_ms": 2000
+  },
+  "semantic_patterns": {
+    "interest_equivalences": ["সুদের হার", "সুদ", "ইন্টারেস্ট রেট", "ইন্টারসেট রেট", "প্রফিট রেট"],
+    "charge_equivalences": ["চার্জ", "ফি", "বাৎসরিক চার্জ", "বার্ষিক ফি", "কস্ট"],
+    "account_equivalences": ["একাউন্ট", "অ্যাকাউন্ট", "খাতা"],
+    "opening_equivalences": ["খুলতে", "ওপেন", "খোলা", "চালু করা"],
+    "benefit_equivalences": ["সুবিধা", "বেনিফিট", "ফায়দা", "সুবিধাসমূহ"]
+  }
+} 
