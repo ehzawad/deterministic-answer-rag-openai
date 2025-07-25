@@ -670,10 +670,8 @@ Example: 3,1,5,2,4"""
             
             # Call LLM for semantic ranking with fallback models
             models_to_try = [
-                config['models'].get('core_model', 'gpt-3.5-turbo'),
-                'gpt-4',
-                'gpt-4-turbo',
-                'gpt-3.5-turbo-0125'
+                config['models'].get('core_model', 'gpt-4.1'),
+                'gpt-4.1-nano'
             ]
             
             response = None
